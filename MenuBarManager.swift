@@ -8,6 +8,21 @@
 import AppKit
 import Carbon.HIToolbox
 
+private func tr(_ key: String) -> String {
+    NSLocalizedString(key, comment: "")
+}
+
+struct LearnedShortcut: Codable, Equatable {
+    let keyCode: UInt16
+    let flagsRawValue: UInt64
+    let label: String
+
+    var cgFlags: CGEventFlags { CGEventFlags(rawValue: flagsRawValue) }
+}
+
+enum TextActionSuffix: String, Codable { case none, space, enter }
+struct TextActionSpec: Codable, Equatable { let text: String; let suffix: TextActionSuffix }
+
 // Button actions that can be assigned
 enum ButtonAction: String, CaseIterable {
     case enterKey = "Enter: Submit prompt"
@@ -18,17 +33,27 @@ enum ButtonAction: String, CaseIterable {
     case ctrlC = "Control + C: Cancel Prompt"
     case spaceKey = "Space: Claude Voice Dictation"
     case fnKey = "Fn: WeChat / 3rd-party Voice Input"
+    case leftCtrl = "Left Control"
+    case rightCtrl = "Right Control"
+    case leftCmd = "Left Command"
     case rightCmd = "Right Command: 3rd-party Voice Dictation"
+    case leftShift = "Left Shift"
+    case rightShift = "Right Shift"
     case rightOpt = "Right Option: 3rd-party Voice Dictation"
+    case customShortcut = "Learned Keyboard Shortcut"
+    case customText = "Custom Text or Command"
     case trackpadClick = "Mouse Click"
     case none = "None"
+
+    var displayTitle: String { tr("button.action.\(String(describing: self))") }
 
     /// Push-to-talk dictation needs the virtual key held for the full press duration.
     /// Only a subset of HID buttons emit reliable release events, so these actions are
     /// only offered for hold-capable buttons.
     var requiresHold: Bool {
         switch self {
-        case .spaceKey, .fnKey, .rightCmd, .rightOpt: return true
+        case .spaceKey, .fnKey, .leftCtrl, .rightCtrl, .leftCmd, .rightCmd,
+             .leftShift, .rightShift, .rightOpt: return true
         default: return false
         }
     }
@@ -36,7 +61,10 @@ enum ButtonAction: String, CaseIterable {
 
 /// HID buttons whose driver emits both press (value=1) and release (value=0) — verified via /tmp/mavrick.log.
 /// menu/tv/select are excluded: menu/tv are press-only on the Siri Remote, select is handled separately for click/drag.
-let holdCapableButtons: Set<String> = ["playPause", "volumeUp", "volumeDown", "siri"]
+let holdCapableButtons: Set<String> = [
+    "playPause", "volumeUp", "volumeDown", "siri",
+    "menu", "tv", "mute", "power"
+]
 
 /// Trackpad swipe directions (single-finger flicks). Detection happens in TouchHandler;
 /// execution is dispatched here so mappings live alongside button mappings.
@@ -66,6 +94,16 @@ enum SwipeAction: String, CaseIterable {
     case tasks         = "/tasks"
     case usage         = "/usage"
     case none          = "None"
+
+    var displayTitle: String {
+        switch self {
+        case .ultrathink, .btw, .compact, .config, .context, .effort, .`init`,
+             .model, .remoteControl, .schedule, .tasks, .usage:
+            return rawValue
+        default:
+            return tr("swipe.action.\(String(describing: self))")
+        }
+    }
 }
 
 // Scroll speed options
@@ -88,12 +126,18 @@ class MenuBarManager {
     private let statusItem: NSStatusItem
     private let menu: NSMenu
     private let statusMenuItem: NSMenuItem
+    private var remotePanelController: RemotePanelController?
+    private(set) var isConnected = false
+    private(set) var remoteModel: AppleRemoteModel = .unknown
     
     // Button mappings (stored in UserDefaults)
     private var buttonMappings: [String: ButtonAction] = [:]
 
     // Swipe gesture mappings (stored in UserDefaults under "swipeMappings").
     private var swipeMappings: [SwipeDirection: SwipeAction] = [:]
+    private var learnedShortcuts: [String: LearnedShortcut] = [:]
+    private var doubleClickMappings: [String: ButtonAction] = [:]
+    private var textActions: [String: TextActionSpec] = [:]
 
     private static let defaultSwipeMappings: [SwipeDirection: SwipeAction] = [
         .up:    .usage,
@@ -111,9 +155,12 @@ class MenuBarManager {
     init(statusItem: NSStatusItem) {
         self.statusItem = statusItem
         self.menu = NSMenu()
-        self.statusMenuItem = NSMenuItem(title: "Status: Disconnected", action: nil, keyEquivalent: "")
+        self.statusMenuItem = NSMenuItem(title: tr("status.disconnected"), action: nil, keyEquivalent: "")
         
         loadMappings()
+        loadLearnedShortcuts()
+        loadDoubleClickMappings()
+        loadTextActions()
         loadSwipeMappings()
         setupMenuBar()
     }
@@ -127,7 +174,9 @@ class MenuBarManager {
             "volumeUp": .upKey,
             "volumeDown": .downKey,
             "siri": .spaceKey,
-            "tv": .ctrlC
+            "tv": .ctrlC,
+            "power": .none,
+            "mute": .none
         ]
 
         // Schema version bumps:
@@ -175,6 +224,35 @@ class MenuBarManager {
             toSave[button] = action.rawValue
         }
         UserDefaults.standard.set(toSave, forKey: "buttonMappings")
+    }
+
+    private func loadLearnedShortcuts() {
+        guard let data = UserDefaults.standard.data(forKey: "learnedShortcuts"),
+              let decoded = try? JSONDecoder().decode([String: LearnedShortcut].self, from: data) else { return }
+        learnedShortcuts = decoded
+    }
+
+    private func saveLearnedShortcuts() {
+        guard let data = try? JSONEncoder().encode(learnedShortcuts) else { return }
+        UserDefaults.standard.set(data, forKey: "learnedShortcuts")
+    }
+
+    private func loadDoubleClickMappings() {
+        guard let saved = UserDefaults.standard.dictionary(forKey: "doubleClickMappings") as? [String: String] else { return }
+        for (button, raw) in saved { if let action = ButtonAction(rawValue: raw) { doubleClickMappings[button] = action } }
+    }
+
+    private func saveDoubleClickMappings() {
+        UserDefaults.standard.set(doubleClickMappings.mapValues(\.rawValue), forKey: "doubleClickMappings")
+    }
+
+    private func loadTextActions() {
+        guard let data = UserDefaults.standard.data(forKey: "textActions"),
+              let decoded = try? JSONDecoder().decode([String: TextActionSpec].self, from: data) else { return }
+        textActions = decoded
+    }
+    private func saveTextActions() {
+        if let data = try? JSONEncoder().encode(textActions) { UserDefaults.standard.set(data, forKey: "textActions") }
     }
     
     /// Procedurally draw the menu-bar icon — a walkie-talkie glyph mirroring the
@@ -237,7 +315,7 @@ class MenuBarManager {
         menu.removeAllItems()
         
         // Title
-        let titleItem = NSMenuItem(title: "Siri Remote", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: tr("menu.title"), action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
         
@@ -248,85 +326,15 @@ class MenuBarManager {
         menu.addItem(statusMenuItem)
         
         menu.addItem(NSMenuItem.separator())
-        
-        // Button Mappings submenu
-        let mappingsItem = NSMenuItem(title: "Button Mappings", action: nil, keyEquivalent: "")
-        let mappingsSubmenu = NSMenu()
-        
-        let buttons = [
-            ("select", "Trackpad Click"),
-            ("menu", "Menu Button"),
-            ("tv", "TV Button"),
-            ("siri", "Siri Button"),
-            ("playPause", "Play/Pause Button"),
-            ("volumeUp", "Volume Up"),
-            ("volumeDown", "Volume Down"),
-        ]
-        
-        for (key, label) in buttons {
-            let buttonItem = NSMenuItem(title: label, action: nil, keyEquivalent: "")
-            let actionSubmenu = NSMenu()
-            let canHold = holdCapableButtons.contains(key)
 
-            for action in ButtonAction.allCases {
-                // Voice-dictation actions require press+release tracking; hide them on tap-only buttons.
-                if action.requiresHold && !canHold { continue }
-                // Mouse Click is only meaningful for the trackpad click button.
-                if action == .trackpadClick && key != "select" { continue }
-
-                let actionItem = NSMenuItem(title: action.rawValue, action: #selector(changeMapping(_:)), keyEquivalent: "")
-                actionItem.target = self
-                actionItem.representedObject = (key, action)
-
-                if buttonMappings[key] == action {
-                    actionItem.state = .on
-                }
-
-                actionSubmenu.addItem(actionItem)
-            }
-
-            buttonItem.submenu = actionSubmenu
-            mappingsSubmenu.addItem(buttonItem)
-        }
-        
-        mappingsItem.submenu = mappingsSubmenu
-        menu.addItem(mappingsItem)
-
-        // Swipe Gestures submenu
-        let swipeItem = NSMenuItem(title: "Swipe Gestures", action: nil, keyEquivalent: "")
-        let swipeSubmenu = NSMenu()
-        let swipes: [(SwipeDirection, String)] = [
-            (.up,    "Swipe Up"),
-            (.down,  "Swipe Down"),
-            (.left,  "Swipe Left"),
-            (.right, "Swipe Right"),
-        ]
-        for (direction, label) in swipes {
-            let dirItem = NSMenuItem(title: label, action: nil, keyEquivalent: "")
-            let actionsMenu = NSMenu()
-            for action in SwipeAction.allCases {
-                // Each arrow-key action only appears on its matching swipe direction.
-                if action == .leftArrow  && direction != .left  { continue }
-                if action == .rightArrow && direction != .right { continue }
-
-                let actionItem = NSMenuItem(title: action.rawValue, action: #selector(changeSwipeMapping(_:)), keyEquivalent: "")
-                actionItem.target = self
-                actionItem.representedObject = (direction, action)
-                if swipeMappings[direction] == action {
-                    actionItem.state = .on
-                }
-                actionsMenu.addItem(actionItem)
-            }
-            dirItem.submenu = actionsMenu
-            swipeSubmenu.addItem(dirItem)
-        }
-        swipeItem.submenu = swipeSubmenu
-        menu.addItem(swipeItem)
+        let panelItem = NSMenuItem(title: "打开遥控器面板…", action: #selector(openRemotePanel), keyEquivalent: ",")
+        panelItem.target = self
+        menu.addItem(panelItem)
 
         menu.addItem(NSMenuItem.separator())
 
         // Quit
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: tr("menu.quit"), action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
     }
@@ -338,6 +346,17 @@ class MenuBarManager {
         buttonMappings[buttonKey] = action
         saveMappings()
         rebuildMenu()
+    }
+
+    @objc private func openRemotePanel() {
+        showRemotePanel()
+    }
+
+    func showRemotePanel() {
+        if remotePanelController == nil {
+            remotePanelController = RemotePanelController(manager: self)
+        }
+        remotePanelController?.showWindow(nil)
     }
 
     @objc private func changeSwipeMapping(_ sender: NSMenuItem) {
@@ -352,9 +371,104 @@ class MenuBarManager {
     func updateConnectionStatus(connected: Bool) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.statusMenuItem.title = connected ? "Status: Connected ✓" : "Status: Disconnected"
+            self.isConnected = connected
+            self.statusMenuItem.title = connected ? tr("status.connected") : tr("status.disconnected")
             self.statusItem.button?.appearsDisabled = !connected
+            self.remotePanelController?.updateConnectionStatus(connected)
         }
+    }
+
+    func updateRemoteModel(_ model: AppleRemoteModel) {
+        remoteModel = model
+        remotePanelController?.updateRemoteModel(model)
+    }
+
+    func setMapping(_ action: ButtonAction, for button: String) {
+        buttonMappings[button] = action
+        saveMappings()
+        rebuildMenu()
+    }
+
+    func availableActions(for button: String) -> [ButtonAction] {
+        ButtonAction.allCases.filter { action in
+            (!action.requiresHold || holdCapableButtons.contains(button)) &&
+            (action != .trackpadClick || button == "select") &&
+            (action != .customShortcut || learnedShortcuts[button] != nil) &&
+            (action != .customText || textActions[button] != nil)
+        }
+    }
+
+    func learnedShortcut(for button: String) -> LearnedShortcut? { learnedShortcuts[button] }
+
+    func setLearnedShortcut(_ shortcut: LearnedShortcut, for button: String) {
+        learnedShortcuts[button] = shortcut
+        buttonMappings[button] = .customShortcut
+        saveLearnedShortcuts()
+        saveMappings()
+        rebuildMenu()
+    }
+
+    func getDoubleClickMapping(for button: String) -> ButtonAction { doubleClickMappings[button] ?? .none }
+
+    func setDoubleClickMapping(_ action: ButtonAction, for button: String) {
+        doubleClickMappings[button] = action
+        saveDoubleClickMappings()
+    }
+
+    func setLearnedDoubleClickShortcut(_ shortcut: LearnedShortcut, for button: String) {
+        learnedShortcuts["double:\(button)"] = shortcut
+        doubleClickMappings[button] = .customShortcut
+        saveLearnedShortcuts()
+        saveDoubleClickMappings()
+    }
+
+    func learnedDoubleClickShortcut(for button: String) -> LearnedShortcut? { learnedShortcuts["double:\(button)"] }
+
+    func textAction(for key: String) -> TextActionSpec? { textActions[key] }
+    func setTextAction(_ spec: TextActionSpec, for button: String, doubleClick: Bool) {
+        let key = doubleClick ? "double:\(button)" : button
+        textActions[key] = spec
+        if doubleClick { doubleClickMappings[button] = .customText; saveDoubleClickMappings() }
+        else { buttonMappings[button] = .customText; saveMappings() }
+        saveTextActions()
+    }
+    func executeTextAction(for key: String) {
+        guard let spec = textActions[key] else { return }
+        typeString(spec.text + (spec.suffix == .space ? " " : ""))
+        if spec.suffix == .enter { DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in self?.sendKey(kVK_Return) } }
+    }
+
+    func availableDoubleClickActions(for button: String) -> [ButtonAction] {
+        ButtonAction.allCases.filter {
+            !$0.requiresHold && ($0 != .trackpadClick || button == "select") &&
+            ($0 != .customShortcut || learnedDoubleClickShortcut(for: button) != nil)
+            && ($0 != .customText || textActions["double:\(button)"] != nil)
+        }
+    }
+
+    func setSwipeMapping(_ action: SwipeAction, for direction: SwipeDirection) {
+        swipeMappings[direction] = action
+        saveSwipeMappings()
+        rebuildMenu()
+    }
+
+    func availableSwipeActions(for direction: SwipeDirection) -> [SwipeAction] {
+        SwipeAction.allCases.filter {
+            ($0 != .leftArrow || direction == .left) &&
+            ($0 != .rightArrow || direction == .right)
+        }
+    }
+
+    func resetMappingsToDefaults() {
+        buttonMappings = [
+            "playPause": .enterKey, "menu": .escKey, "select": .trackpadClick,
+            "volumeUp": .upKey, "volumeDown": .downKey, "siri": .spaceKey,
+            "tv": .ctrlC, "power": .none, "mute": .none
+        ]
+        swipeMappings = Self.defaultSwipeMappings
+        saveMappings()
+        saveSwipeMappings()
+        rebuildMenu()
     }
     
     func getMapping(for button: String) -> ButtonAction {
@@ -478,8 +592,22 @@ class MenuBarManager {
             sendFnKeyTap()
         case .rightCmd:
             sendModifierTap(kVK_RightCommand, flag: .maskCommand)
+        case .leftCmd:
+            sendModifierTap(kVK_Command, flag: .maskCommand)
+        case .leftCtrl:
+            sendModifierTap(kVK_Control, flag: .maskControl)
+        case .rightCtrl:
+            sendModifierTap(kVK_RightControl, flag: .maskControl)
+        case .leftShift:
+            sendModifierTap(kVK_Shift, flag: .maskShift)
+        case .rightShift:
+            sendModifierTap(kVK_RightShift, flag: .maskShift)
         case .rightOpt:
             sendModifierTap(kVK_RightOption, flag: .maskAlternate)
+        case .customShortcut:
+            break // HID path resolves the button-specific learned shortcut.
+        case .customText:
+            break // HID path resolves the button-specific text action.
         case .trackpadClick:
             performClick()
         }

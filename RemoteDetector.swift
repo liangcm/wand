@@ -9,6 +9,31 @@ import Foundation
 import IOKit
 import IOKit.hid
 
+enum AppleRemoteModel: String {
+    case a1513 = "Siri Remote 第一代 A1513/A1962"
+    case a2540 = "Siri Remote 第二代 A2540"
+    case a2854 = "Siri Remote 第三代 A2854"
+    case unknown = "Apple Remote（未知型号）"
+
+    static func identify(productID: Int) -> AppleRemoteModel {
+        switch productID {
+        case 0x0221, 0x0255, 0x0266, 0x0267, 0x0269: return .a1513
+        case 0x026D, 0x0C4E, 0x030D: return .a2540
+        case 0x0314, 0x0315, 0x0C4F, 0x030E: return .a2854
+        default: return .unknown
+        }
+    }
+
+    var imageName: String {
+        switch self {
+        case .a1513: return "03-04_Siri_Remote_A1513_A1962.png"
+        case .a2540: return "05_Siri_Remote_A2540.png"
+        case .a2854: return "06_Siri_Remote_A2854.png"
+        case .unknown: return "06_Siri_Remote_A2854.png"
+        }
+    }
+}
+
 /// Append diagnostic line to /tmp/mavrick.log (unified-log redacts NSLog under hardened runtime).
 func rmDebug(_ msg: String) {
     let line = "\(Date()) \(msg)\n"
@@ -39,7 +64,7 @@ class RemoteDetector {
     // Known Siri Remote / Apple TV Remote product IDs
     private let knownProductIDs: [Int] = [
         0x0221, 0x0255, 0x0266, 0x0267, 0x0269,
-        0x026D, 0x0C4E, 0x0C4F, 0x030D, 0x030E
+        0x026D, 0x0314, 0x0C4E, 0x0C4F, 0x030D, 0x030E
     ]
     
     init(deviceCallback: @escaping (IOHIDDevice?) -> Void) {

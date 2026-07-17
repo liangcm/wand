@@ -39,6 +39,18 @@ if [ -d "Resources" ]; then
     echo "Menu bar icons added to app bundle"
 fi
 
+# Copy localized strings into the app bundle.
+for LPROJ in en.lproj zh-Hans.lproj; do
+    if [ -d "$LPROJ" ]; then
+        cp -R "$LPROJ" "${APP_BUNDLE}/Contents/Resources/"
+    fi
+done
+
+if [ -d "Apple_Remote_历代型号高清图" ]; then
+    mkdir -p "${APP_BUNDLE}/Contents/Resources/RemoteModels"
+    cp "Apple_Remote_历代型号高清图"/*.png "${APP_BUNDLE}/Contents/Resources/RemoteModels/"
+fi
+
 # Create proper Info.plist with all required keys
 echo "Creating Info.plist..."
 cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF

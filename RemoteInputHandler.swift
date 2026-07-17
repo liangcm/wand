@@ -45,6 +45,8 @@ class RemoteInputHandler {
     /// button across multiple HID interfaces (6 seized here), so every physical press/release
     /// fires the callback N times. This collapses dup events to a single state transition.
     private var buttonState: [String: Bool] = [:]
+    private var pendingSingleClicks: [String: DispatchWorkItem] = [:]
+    private let doubleClickInterval: TimeInterval = 0.32
     
     init(cursorController: CursorController, menuBarManager: MenuBarManager) {
         self.cursorController = cursorController
@@ -240,6 +242,8 @@ class RemoteInputHandler {
         case (0x0C, 0x40): return "menu"          // Menu
         case (0x0C, 0x30): return "power"         // Power
         case (0x0C, 0x20): return "mute"          // Mute (some remotes)
+        case (0x0C, 0x43): return "mute"          // Mute (new silver Siri Remote)
+        case (0x0C, 0xE2): return "mute"          // HID Consumer Mute (silver Siri Remote)
         
         // Button Page (0x09)
         case (0x09, 0x01): return "select"        // Button 1
@@ -260,7 +264,27 @@ class RemoteInputHandler {
     
     // MARK: - Action Execution
     
-    private func executeAction(_ action: ButtonAction, button: String, pressed: Bool) {
+    private func executeAction(_ action: ButtonAction, button: String, pressed: Bool, bypassDouble: Bool = false) {
+        if !bypassDouble, pressed,
+           let manager = menuBarManager,
+           manager.getDoubleClickMapping(for: button) != .none {
+            if let pending = pendingSingleClicks.removeValue(forKey: button) {
+                pending.cancel()
+                let doubleAction = manager.getDoubleClickMapping(for: button)
+                executeAction(doubleAction, button: "double:\(button)", pressed: true, bypassDouble: true)
+                return
+            }
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.pendingSingleClicks.removeValue(forKey: button)
+                if !action.requiresHold {
+                    self.executeAction(action, button: button, pressed: true, bypassDouble: true)
+                }
+            }
+            pendingSingleClicks[button] = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + doubleClickInterval, execute: work)
+            if !action.requiresHold { return }
+        }
         if action.requiresHold {
             handleHoldAction(action, button: button, pressed: pressed)
             return
@@ -282,10 +306,17 @@ class RemoteInputHandler {
             sendKey(kVK_Escape)
         case .ctrlC:
             sendKey(kVK_ANSI_C, flags: .maskControl)
-        case .spaceKey, .fnKey, .rightCmd, .rightOpt:
+        case .spaceKey, .fnKey, .leftCtrl, .rightCtrl, .leftCmd, .rightCmd,
+             .leftShift, .rightShift, .rightOpt:
             break // handled by handleHoldAction
         case .trackpadClick:
             cursorController.performClick()
+        case .customShortcut:
+            if let shortcut = menuBarManager?.learnedShortcut(for: button) {
+                sendKey(Int(shortcut.keyCode), flags: shortcut.cgFlags)
+            }
+        case .customText:
+            menuBarManager?.executeTextAction(for: button)
         }
     }
 
@@ -310,7 +341,12 @@ class RemoteInputHandler {
         let spec: (keyCode: Int, flags: CGEventFlags)
         switch action {
         case .spaceKey: spec = (kVK_Space,        [])
+        case .leftCtrl: spec = (kVK_Control,       .maskControl)
+        case .rightCtrl: spec = (kVK_RightControl, .maskControl)
+        case .leftCmd: spec = (kVK_Command,        .maskCommand)
         case .rightCmd: spec = (kVK_RightCommand, .maskCommand)
+        case .leftShift: spec = (kVK_Shift,        .maskShift)
+        case .rightShift: spec = (kVK_RightShift,  .maskShift)
         case .rightOpt: spec = (kVK_RightOption,  .maskAlternate)
         default: return
         }

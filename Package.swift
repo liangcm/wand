@@ -18,6 +18,7 @@ let package = Package(
                 "main.swift",
                 "SiriRemoteApp.swift",
                 "MenuBarManager.swift",
+                "RemotePanelController.swift",
                 "RemoteDetector.swift",
                 "RemoteInputHandler.swift",
                 "CursorController.swift",

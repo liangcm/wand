@@ -9,6 +9,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Darwin
+import IOKit.hid
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     
@@ -39,6 +40,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Initialize menu bar manager
         menuBarManager = MenuBarManager(statusItem: statusItem)
+        if CommandLine.arguments.contains("--show-panel") {
+            menuBarManager.showRemotePanel()
+        }
         
         // Check accessibility permissions
         checkAccessibilityPermissions()
@@ -66,6 +70,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         remoteDetector = RemoteDetector { [weak self] device in
             DispatchQueue.main.async {
                 self?.remoteInputHandler?.setRemoteDevice(device)
+                if let device,
+                   let productID = IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? Int {
+                    self?.menuBarManager.updateRemoteModel(AppleRemoteModel.identify(productID: productID))
+                }
                 self?.menuBarManager.updateConnectionStatus(connected: device != nil)
             }
         }
