@@ -60,9 +60,9 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleVersion</key>
-	<string>1.0</string>
+	<string>0.2.0</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>0.2.0</string>
 	<key>CFBundleIconFile</key>
 	<string>Wand</string>
 	<key>NSHumanReadableCopyright</key>

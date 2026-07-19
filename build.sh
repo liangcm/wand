@@ -12,6 +12,7 @@ SWIFT_FILES=(
     "SiriRemoteApp.swift"
     "MenuBarManager.swift"
     "RemotePanelController.swift"
+    "PairingGuideController.swift"
     "RemoteDetector.swift"
     "RemoteInputHandler.swift"
     "CursorController.swift"

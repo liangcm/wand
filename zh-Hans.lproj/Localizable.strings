@@ -1,9 +1,22 @@
 /* 菜单栏 */
 "menu.title" = "Siri 遥控器";
 "menu.openPanel" = "打开遥控器面板…";
+"menu.pairingGuide" = "配对指引…";
 "menu.quit" = "退出 Wand";
 "status.connected" = "状态：已连接 ✓";
 "status.disconnected" = "状态：未连接";
+
+/* 配对指引窗口 */
+"pairing.windowTitle" = "配对指引";
+"pairing.heading" = "把 Siri Remote 配对到这台 Mac";
+"pairing.intro" = "Apple 并未官方支持把 Siri Remote 连到 Mac——它能用，是因为遥控器本质是标准蓝牙设备，所以可能要多试几次。";
+"pairing.step1" = "先关掉（或拔掉电源）你的 Apple TV。它若在附近开着，会把遥控器抢回去导致配对失败。同时确保遥控器已充电。";
+"pairing.step2" = "让遥控器进入配对模式：把它贴近 Mac，同时按住「菜单」（一代 · A1513/A1962）或「返回 ←」（二/三代 · A2540/A2854），再加「音量+（＋）」，保持约 2–5 秒。";
+"pairing.step3" = "在 Mac 上打开 系统设置 → 蓝牙（旧版 macOS 为 系统偏好设置 → 蓝牙）。遥控器不会显示成「Siri Remote」，而是一串字母数字（蓝牙地址或序列号），可能在「附近的设备」里，需要往下滚。点它旁边的「连接」。";
+"pairing.step4" = "回到 Wand，菜单栏状态会变成「已连接 ✓」。若按键仍不生效，去 系统设置 → 隐私与安全性 → 辅助功能 里勾选 Wand。";
+"pairing.tips" = "小贴士：配不上就把遥控器充电 30 分钟以上，并贴近 Mac。二/三代若进不了配对模式，先重启遥控器——按住 电视/控制中心键 + 音量−（–）约 5 秒——再重试。把蓝牙关掉再打开也常有帮助。";
+"pairing.openBluetooth" = "打开蓝牙设置";
+"pairing.close" = "关闭";
 
 /* 遥控器按键名（面板画布 + 当前选择） */
 "button.select" = "触控板中心点击";
@@ -39,6 +52,8 @@
 "action.cursorDown" = "光标下移";
 "action.cursorLeft" = "光标左移";
 "action.cursorRight" = "光标右移";
+"action.pageUp" = "向上翻页";
+"action.pageDown" = "向下翻页";
 "action.learnedShortcut" = "学习快捷键";
 "action.customText" = "输入文本或命令";
 "action.openApp" = "打开应用";

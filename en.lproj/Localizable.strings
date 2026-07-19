@@ -1,9 +1,22 @@
 /* Menu bar */
 "menu.title" = "Siri Remote";
 "menu.openPanel" = "Open Remote Panel…";
+"menu.pairingGuide" = "How to Pair…";
 "menu.quit" = "Quit Wand";
 "status.connected" = "Status: Connected ✓";
 "status.disconnected" = "Status: Disconnected";
+
+/* Pairing guide window */
+"pairing.windowTitle" = "Pairing Guide";
+"pairing.heading" = "Pair your Siri Remote to this Mac";
+"pairing.intro" = "Apple doesn't officially support connecting a Siri Remote to a Mac — it works because the remote is a standard Bluetooth device, so a few tries may be needed.";
+"pairing.step1" = "Power off (or unplug) your Apple TV first. If it stays on nearby it grabs the remote back and pairing fails. Make sure the remote is charged.";
+"pairing.step2" = "Put the remote in pairing mode: hold it close to the Mac and press and hold Menu (1st gen · A1513/A1962) or Back ← (2nd/3rd gen · A2540/A2854) together with Volume Up (＋) for about 2–5 seconds.";
+"pairing.step3" = "On the Mac, open System Settings → Bluetooth (System Preferences → Bluetooth on older macOS). The remote does not appear as “Siri Remote” — look for a string of letters and numbers (a Bluetooth address or serial number), possibly under “Nearby Devices,” and scroll down. Click Connect next to it.";
+"pairing.step4" = "Back in Wand, the menu-bar status turns to “Connected ✓.” If buttons still don't respond, enable Wand in System Settings → Privacy & Security → Accessibility.";
+"pairing.tips" = "Tips: if it won't pair, charge the remote for 30+ minutes and keep it close to the Mac. For 2nd/3rd-gen remotes that won't enter pairing mode, first restart the remote — hold the TV/Control Center button + Volume Down (–) for about 5 seconds — then try again. Toggling Bluetooth off and on can also help.";
+"pairing.openBluetooth" = "Open Bluetooth Settings";
+"pairing.close" = "Close";
 
 /* Remote button names (panel canvas + current selection) */
 "button.select" = "Trackpad Center Click";
@@ -39,6 +52,8 @@
 "action.cursorDown" = "Cursor Down";
 "action.cursorLeft" = "Cursor Left";
 "action.cursorRight" = "Cursor Right";
+"action.pageUp" = "Page Up";
+"action.pageDown" = "Page Down";
 "action.learnedShortcut" = "Learned Shortcut";
 "action.customText" = "Text or Command";
 "action.openApp" = "Open App";

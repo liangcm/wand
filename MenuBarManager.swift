@@ -36,10 +36,12 @@ enum RemoteAction: String, CaseIterable {
     case leftCtrl, rightCtrl, leftCmd, rightCmd, leftOpt, rightOpt, leftShift, rightShift, fn
     case leftClick, rightClick
     case cursorUp, cursorDown, cursorLeft, cursorRight   // nudge the mouse cursor（方向环默认动作）
+    case pageUp, pageDown
     // 第 2 类 · F 键
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
     // 第 3 类 · 组合键（learnedShortcut = 自定义组合，兜底）
     case cmdC, cmdV, cmdX, cmdZ, cmdShiftZ, cmdA, cmdS, cmdW, cmdF, ctrlC, shiftTab
+    case cmdF1, cmdF2, cmdF3, cmdF4, cmdF5, cmdF6, cmdF7, cmdF8, cmdF9, cmdF10, cmdF11, cmdF12
     case learnedShortcut
     // 特殊功能
     case customText, openApp, none
@@ -50,11 +52,13 @@ enum RemoteAction: String, CaseIterable {
         switch self {
         case .enter, .tab, .space, .backspace, .delete, .esc, .up, .down, .left, .right,
              .leftCtrl, .rightCtrl, .leftCmd, .rightCmd, .leftOpt, .rightOpt, .leftShift, .rightShift, .fn,
-             .leftClick, .rightClick, .cursorUp, .cursorDown, .cursorLeft, .cursorRight:
+             .leftClick, .rightClick, .cursorUp, .cursorDown, .cursorLeft, .cursorRight,
+             .pageUp, .pageDown:
             return .functionKey
         case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
             return .fKey
-        case .cmdC, .cmdV, .cmdX, .cmdZ, .cmdShiftZ, .cmdA, .cmdS, .cmdW, .cmdF, .ctrlC, .shiftTab, .learnedShortcut:
+        case .cmdC, .cmdV, .cmdX, .cmdZ, .cmdShiftZ, .cmdA, .cmdS, .cmdW, .cmdF, .ctrlC, .shiftTab, .learnedShortcut,
+             .cmdF1, .cmdF2, .cmdF3, .cmdF4, .cmdF5, .cmdF6, .cmdF7, .cmdF8, .cmdF9, .cmdF10, .cmdF11, .cmdF12:
             return .combo
         case .customText, .openApp, .none:
             return .special
@@ -88,6 +92,8 @@ enum RemoteAction: String, CaseIterable {
         case .cursorDown: return tr("action.cursorDown")
         case .cursorLeft: return tr("action.cursorLeft")
         case .cursorRight: return tr("action.cursorRight")
+        case .pageUp: return tr("action.pageUp")
+        case .pageDown: return tr("action.pageDown")
         case .f1: return "F1"; case .f2: return "F2"; case .f3: return "F3"; case .f4: return "F4"
         case .f5: return "F5"; case .f6: return "F6"; case .f7: return "F7"; case .f8: return "F8"
         case .f9: return "F9"; case .f10: return "F10"; case .f11: return "F11"; case .f12: return "F12"
@@ -102,6 +108,18 @@ enum RemoteAction: String, CaseIterable {
         case .cmdF: return "Cmd+F"
         case .ctrlC: return "Ctrl+C"
         case .shiftTab: return "Shift+Tab"
+        case .cmdF1: return "Cmd+F1"
+        case .cmdF2: return "Cmd+F2"
+        case .cmdF3: return "Cmd+F3"
+        case .cmdF4: return "Cmd+F4"
+        case .cmdF5: return "Cmd+F5"
+        case .cmdF6: return "Cmd+F6"
+        case .cmdF7: return "Cmd+F7"
+        case .cmdF8: return "Cmd+F8"
+        case .cmdF9: return "Cmd+F9"
+        case .cmdF10: return "Cmd+F10"
+        case .cmdF11: return "Cmd+F11"
+        case .cmdF12: return "Cmd+F12"
         case .learnedShortcut: return tr("action.learnedShortcut")
         case .customText: return tr("action.customText")
         case .openApp: return tr("action.openApp")
@@ -238,6 +256,7 @@ class MenuBarManager {
     private let menu: NSMenu
     private let statusMenuItem: NSMenuItem
     private var remotePanelController: RemotePanelController?
+    private var pairingGuideController: PairingGuideController?
     private(set) var isConnected = false
     private(set) var remoteModel: AppleRemoteModel = .unknown
     
@@ -465,6 +484,11 @@ class MenuBarManager {
         
         menu.addItem(NSMenuItem.separator())
 
+        // Pairing help sits right under the status line — a disconnected user is looking there.
+        let pairingItem = NSMenuItem(title: tr("menu.pairingGuide"), action: #selector(openPairingGuide), keyEquivalent: "")
+        pairingItem.target = self
+        menu.addItem(pairingItem)
+
         let panelItem = NSMenuItem(title: tr("menu.openPanel"), action: #selector(openRemotePanel), keyEquivalent: ",")
         panelItem.target = self
         menu.addItem(panelItem)
@@ -479,6 +503,14 @@ class MenuBarManager {
     
     @objc private func openRemotePanel() {
         showRemotePanel()
+    }
+
+    @objc private func openPairingGuide() {
+        if pairingGuideController == nil {
+            pairingGuideController = PairingGuideController()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        pairingGuideController?.showWindow(nil)
     }
 
     func showRemotePanel() {
@@ -684,6 +716,8 @@ class MenuBarManager {
         case .cursorDown:  cursorController?.moveCursor(deltaX: 0, deltaY: dpadStep)
         case .cursorLeft:  cursorController?.moveCursor(deltaX: -dpadStep, deltaY: 0)
         case .cursorRight: cursorController?.moveCursor(deltaX: dpadStep, deltaY: 0)
+        case .pageUp:    sendKey(kVK_PageUp)
+        case .pageDown:  sendKey(kVK_PageDown)
         // 第 2 类 · F 键
         case .f1:  sendKey(kVK_F1);  case .f2:  sendKey(kVK_F2);  case .f3:  sendKey(kVK_F3)
         case .f4:  sendKey(kVK_F4);  case .f5:  sendKey(kVK_F5);  case .f6:  sendKey(kVK_F6)
@@ -701,6 +735,19 @@ class MenuBarManager {
         case .cmdF:      sendKey(kVK_ANSI_F, flags: .maskCommand)
         case .ctrlC:     sendKey(kVK_ANSI_C, flags: .maskControl)
         case .shiftTab:  sendKey(kVK_Tab, flags: .maskShift)
+        // Cmd+F1..F12（F 键 keyCode 乱序，取自 Carbon HIToolbox；纯 F 键走 .f1..f12）
+        case .cmdF1: sendKey(122, flags: .maskCommand)
+        case .cmdF2: sendKey(120, flags: .maskCommand)
+        case .cmdF3: sendKey(99, flags: .maskCommand)
+        case .cmdF4: sendKey(118, flags: .maskCommand)
+        case .cmdF5: sendKey(96, flags: .maskCommand)
+        case .cmdF6: sendKey(97, flags: .maskCommand)
+        case .cmdF7: sendKey(98, flags: .maskCommand)
+        case .cmdF8: sendKey(100, flags: .maskCommand)
+        case .cmdF9: sendKey(101, flags: .maskCommand)
+        case .cmdF10: sendKey(109, flags: .maskCommand)
+        case .cmdF11: sendKey(103, flags: .maskCommand)
+        case .cmdF12: sendKey(111, flags: .maskCommand)
         case .learnedShortcut:
             guard let shortcut = learnedShortcuts[storageKey] else { break }
             // Fn is a modifier, not a regular key — keyDown/keyUp for kVK_Function is silently
