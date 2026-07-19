@@ -1,6 +1,6 @@
 //
 //  SiriRemote-Bridging-Header.h
-//  Mavrick
+//  Wand
 //
 //  Bridging header to expose MultitouchSupport private framework to Swift
 //

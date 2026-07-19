@@ -2,8 +2,10 @@ import Foundation
 import AppKit
 import CoreGraphics
 
-/// Render one frame of the Mavrick icon at the given pixel size.
-/// Design: squircle with solid #252525 background and solid #FFFFFF walkie-talkie illustration.
+/// Render one frame of the Wand icon at the given pixel size.
+/// Design: silver squircle with a dark Siri Remote silhouette — a tall rounded body, the
+/// trackpad punched out as a circle near the top, and two small button dots below (even-odd
+/// fill, so the cutouts show the silver background through them).
 func renderIcon(size: CGFloat) -> Data? {
     let w = Int(size), h = Int(size)
     let space = CGColorSpaceCreateDeviceRGB()
@@ -17,42 +19,33 @@ func renderIcon(size: CGFloat) -> Data? {
     let rect = CGRect(x: 0, y: 0, width: size, height: size)
     let cornerRadius = size * 0.225  // macOS Big Sur+ squircle ratio
 
-    // Clip to rounded-rect, then fill with solid background
     ctx.saveGState()
     ctx.addPath(CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil))
     ctx.clip()
 
-    // Solid #252525 background.
-    ctx.setFillColor(CGColor(red: 0x25/255, green: 0x25/255, blue: 0x25/255, alpha: 1))
+    // Silver-grey background (echoes the aluminium Siri Remote).
+    ctx.setFillColor(CGColor(red: 0.80, green: 0.80, blue: 0.84, alpha: 1))
     ctx.fill(rect)
 
-    // White walkie-talkie silhouette (same shape family as the menu-bar glyph).
-    // Body + display/speaker cutouts rendered as one even-odd path so the holes stay transparent
-    // and the purple→pink gradient shows through them (screen looks "on", speaker looks "open").
-    let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+    // Dark Siri Remote silhouette. Body + trackpad/button cutouts as one even-odd path, so the
+    // holes reveal the silver behind them (trackpad and buttons read as light on dark).
+    let dark = CGColor(red: 0x2b/255, green: 0x2b/255, blue: 0x30/255, alpha: 1)
+    let body = CGRect(x: 0.37 * size, y: 0.13 * size, width: 0.26 * size, height: 0.74 * size)
+    let padR: CGFloat = 0.095 * size
+    let trackpad = CGRect(x: 0.5 * size - padR, y: 0.66 * size - padR, width: 2 * padR, height: 2 * padR)
+    let btnR: CGFloat = 0.028 * size
+    let btnTop = CGRect(x: 0.5 * size - btnR, y: 0.40 * size - btnR, width: 2 * btnR, height: 2 * btnR)
+    let btnBot = CGRect(x: 0.5 * size - btnR, y: 0.29 * size - btnR, width: 2 * btnR, height: 2 * btnR)
 
-    let bodyRect    = CGRect(x: 0.300 * size, y: 0.150 * size, width: 0.400 * size, height: 0.590 * size)
-    let displayRect = CGRect(x: 0.355 * size, y: 0.610 * size, width: 0.290 * size, height: 0.070 * size)
-    let speakerRect = CGRect(x: 0.385 * size, y: 0.220 * size, width: 0.230 * size, height: 0.230 * size)
-    let bodyRadius:    CGFloat = 0.042 * size
-    let displayRadius: CGFloat = 0.014 * size
+    let remote = CGMutablePath()
+    remote.addPath(CGPath(roundedRect: body, cornerWidth: 0.11 * size, cornerHeight: 0.11 * size, transform: nil))
+    remote.addEllipse(in: trackpad)
+    remote.addEllipse(in: btnTop)
+    remote.addEllipse(in: btnBot)
 
-    let walkie = CGMutablePath()
-    walkie.addPath(CGPath(roundedRect: bodyRect,    cornerWidth: bodyRadius,    cornerHeight: bodyRadius,    transform: nil))
-    walkie.addPath(CGPath(roundedRect: displayRect, cornerWidth: displayRadius, cornerHeight: displayRadius, transform: nil))
-    walkie.addEllipse(in: speakerRect)
-
-    ctx.setFillColor(white)
-    ctx.addPath(walkie)
+    ctx.setFillColor(dark)
+    ctx.addPath(remote)
     ctx.fillPath(using: .evenOdd)
-
-    // Single antenna rising from left-of-center above the body.
-    ctx.setStrokeColor(white)
-    ctx.setLineWidth(0.028 * size)
-    ctx.setLineCap(.round)
-    ctx.move(to: CGPoint(x: 0.425 * size, y: 0.740 * size))
-    ctx.addLine(to: CGPoint(x: 0.425 * size, y: 0.905 * size))
-    ctx.strokePath()
 
     ctx.restoreGState()
 
@@ -75,7 +68,7 @@ let frames: [(name: String, px: Int)] = [
     ("icon_512x512@2x.png",1024),
 ]
 
-let outDir = URL(fileURLWithPath: "Mavrick.iconset")
+let outDir = URL(fileURLWithPath: "Wand.iconset")
 try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 
 for frame in frames {
@@ -85,4 +78,4 @@ for frame in frames {
     }
     try data.write(to: outDir.appendingPathComponent(frame.name))
 }
-print("Wrote \(frames.count) frames to Mavrick.iconset/")
+print("Wrote \(frames.count) frames to Wand.iconset/")

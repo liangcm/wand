@@ -1,6 +1,6 @@
 //
 //  main.swift
-//  Mavrick
+//  Wand
 //
 //  Application entry point
 //

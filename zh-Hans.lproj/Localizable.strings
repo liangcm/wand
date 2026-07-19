@@ -1,42 +1,109 @@
+/* 菜单栏 */
 "menu.title" = "Siri 遥控器";
-"menu.buttonMappings" = "按键映射";
-"menu.swipeGestures" = "滑动手势";
-"menu.quit" = "退出 Mavrick";
+"menu.openPanel" = "打开遥控器面板…";
+"menu.quit" = "退出 Wand";
 "status.connected" = "状态：已连接 ✓";
 "status.disconnected" = "状态：未连接";
-"button.select" = "触控板点击";
-"button.menu" = "菜单按键";
-"button.tv" = "TV 按键";
-"button.siri" = "Siri 按键";
-"button.playPause" = "播放/暂停按键";
+
+/* 遥控器按键名（面板画布 + 当前选择） */
+"button.select" = "触控板中心点击";
+"button.menu" = "返回键";
+"button.tv" = "TV 键";
+"button.siri" = "侧边 Siri/语音键";
+"button.playPause" = "播放/暂停";
 "button.volumeUp" = "音量加";
 "button.volumeDown" = "音量减";
-"button.power" = "电源按键";
-"button.mute" = "静音按键";
-"button.action.enterKey" = "Enter：提交指令";
-"button.action.tabKey" = "Tab：自动补全 / 接受建议";
-"button.action.upKey" = "上方向键：向上导航";
-"button.action.downKey" = "下方向键：向下导航";
-"button.action.escKey" = "Esc：返回";
-"button.action.ctrlC" = "Control + C：取消指令";
-"button.action.spaceKey" = "空格：Claude 语音输入";
-"button.action.fnKey" = "Fn：微信 / 第三方语音输入";
-"button.action.leftCtrl" = "左 Control";
-"button.action.rightCtrl" = "右 Control";
-"button.action.leftCmd" = "左 Command";
-"button.action.rightCmd" = "右 Command";
-"button.action.leftShift" = "左 Shift";
-"button.action.rightShift" = "右 Shift";
-"button.action.rightOpt" = "右 Option：第三方语音输入";
-"button.action.customShortcut" = "已学习的键盘快捷键";
-"button.action.customText" = "自定义文本或命令";
-"button.action.trackpadClick" = "鼠标点击";
-"button.action.none" = "无";
+"button.mute" = "静音键";
+"button.power" = "电源键";
+
+/* 滑动手势名 */
 "swipe.up" = "向上滑";
 "swipe.down" = "向下滑";
 "swipe.left" = "向左滑";
 "swipe.right" = "向右滑";
-"swipe.action.leftArrow" = "左方向键：向左导航";
-"swipe.action.rightArrow" = "右方向键：向右导航";
-"swipe.action.modeSwitch" = "模式切换（Shift + Tab）";
-"swipe.action.none" = "无";
+
+/* 动作显示名（语言相关的部分；Enter/F1/Cmd+C 等中英一致，不设 key） */
+"action.up" = "↑ 上";
+"action.down" = "↓ 下";
+"action.left" = "← 左";
+"action.right" = "→ 右";
+"action.leftCtrl" = "左 Ctrl";
+"action.rightCtrl" = "右 Ctrl";
+"action.leftCmd" = "左 Cmd";
+"action.rightCmd" = "右 Cmd";
+"action.leftOpt" = "左 Opt";
+"action.rightOpt" = "右 Opt";
+"action.leftShift" = "左 Shift";
+"action.rightShift" = "右 Shift";
+"action.leftClick" = "鼠标左键";
+"action.rightClick" = "鼠标右键";
+"action.learnedShortcut" = "学习快捷键";
+"action.customText" = "输入文本或命令";
+"action.openApp" = "打开应用";
+"action.none" = "无";
+/* %@ = 应用名，如「打开 Safari」 */
+"button.action.openApp.named" = "打开 %@";
+
+/* 遥控器型号 */
+"model.a1513" = "Siri Remote 第一代 A1513/A1962";
+"model.a2540" = "Siri Remote 第二代 A2540";
+"model.a2854" = "Siri Remote 第三代 A2854";
+"model.unknown" = "Apple Remote（未知型号）";
+
+/* 遥控器面板 */
+"panel.title" = "Wand 遥控器面板";
+"panel.inspectorTitle" = "按键设置";
+"panel.clickMode.single" = "单击";
+"panel.clickMode.double" = "双击";
+"panel.currentSelection" = "当前选择";
+"panel.mappingCaption" = "按键映射";
+"panel.help.selectLocked" = "触控板中心点击固定为鼠标点击 / 按住拖拽，不可更改。";
+"panel.help.button" = "按下该按键时，将执行所选操作。";
+"panel.help.swipe" = "快速滑动触控板时，将执行所选操作。";
+"panel.help.learning" = "正在学习：例如按 Command + K、Shift + Tab 或单个按键。";
+"panel.learnButton" = "学习键盘快捷键…";
+"panel.learnButton.active" = "请按键盘按键或组合键…（Esc 取消）";
+"panel.textButton" = "输入文本或命令…";
+"panel.appButton" = "打开应用…";
+"panel.sensitivity" = "鼠标灵敏度";
+"panel.tapToClick" = "轻触点击";
+"panel.accessibilitySettings" = "辅助功能设置…";
+"panel.resetDefaults" = "恢复默认设置";
+"panel.done" = "完成";
+"panel.connected" = "Siri Remote 已连接";
+"panel.disconnected" = "Siri Remote 未连接";
+"panel.ax.granted" = "辅助功能：已授权";
+"panel.ax.denied" = "辅助功能：未授权";
+"panel.ax.tooltip.granted" = "Wand 已可生成键盘和鼠标事件";
+"panel.ax.tooltip.denied" = "点击前往系统设置授权";
+"panel.category.functionKeys" = "功能键";
+"panel.category.fKeys" = "F 键";
+"panel.category.combos" = "组合键";
+
+/* 弹窗 */
+"alert.save" = "保存";
+"alert.cancel" = "取消";
+"alert.text.title" = "输入文本或命令";
+"alert.text.message" = "例如 /compact，并选择输入后的操作。";
+"alert.text.suffix.none" = "不追加";
+"alert.text.suffix.space" = "追加空格";
+"alert.text.suffix.enter" = "追加 Enter";
+"alert.app.title" = "打开应用";
+"alert.app.message" = "选择按下该输入时要打开的应用。";
+"alert.app.other" = "选择其他…";
+"alert.app.panelTitle" = "选择应用";
+"alert.app.panelPrompt" = "选择";
+
+/* 画布 */
+"canvas.click" = "点击";
+
+/* 学习快捷键的按键名 */
+"key.modifier" = "修饰键";
+"key.leftControl" = "左 Control";
+"key.rightControl" = "右 Control";
+"key.leftCommand" = "左 Command";
+"key.rightCommand" = "右 Command";
+"key.leftShift" = "左 Shift";
+"key.rightShift" = "右 Shift";
+"key.leftOption" = "左 Option";
+"key.rightOption" = "右 Option";

@@ -5,14 +5,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "Mavrick",
+    name: "Wand",
     platforms: [.macOS(.v11)],
     products: [
-        .executable(name: "Mavrick", targets: ["Mavrick"])
+        .executable(name: "Wand", targets: ["Wand"])
     ],
     targets: [
         .executableTarget(
-            name: "Mavrick",
+            name: "Wand",
             path: ".",
             sources: [
                 "main.swift",
@@ -22,7 +22,6 @@ let package = Package(
                 "RemoteDetector.swift",
                 "RemoteInputHandler.swift",
                 "CursorController.swift",
-                "MediaController.swift",
                 "MediaKeyInterceptor.swift",
                 "TouchHandler.swift",
                 "SystemVolume.swift"

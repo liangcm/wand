@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Build script for Mavrick
+# Build script for Wand
 # Make sure Xcode Command Line Tools are installed: xcode-select --install
 
 set -e
 
-echo "Building Mavrick..."
+echo "Building Wand..."
 
 SWIFT_FILES=(
     "main.swift"
@@ -15,7 +15,6 @@ SWIFT_FILES=(
     "RemoteDetector.swift"
     "RemoteInputHandler.swift"
     "CursorController.swift"
-    "MediaController.swift"
     "MediaKeyInterceptor.swift"
     "TouchHandler.swift"
     "SystemVolume.swift"
@@ -46,7 +45,7 @@ echo "Building for: $TARGET"
 swiftc \
     -sdk "$SDK_PATH" \
     -target "$TARGET" \
-    -o Mavrick \
+    -o Wand \
     "${SWIFT_FILES[@]}" \
     -import-objc-header SiriRemote-Bridging-Header.h \
     -F /System/Library/PrivateFrameworks \
@@ -65,7 +64,7 @@ if [ $? -eq 0 ]; then
     echo "  ./create_app_bundle.sh"
     echo ""
     echo "Or run directly with:"
-    echo "  ./Mavrick"
+    echo "  ./Wand"
 else
     echo ""
     echo "✗ Build failed!"

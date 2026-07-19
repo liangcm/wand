@@ -1,6 +1,6 @@
 //
 //  RemoteDetector.swift
-//  Mavrick
+//  Wand
 //
 //  Detects Siri Remote via IOKit HID
 //
@@ -10,10 +10,10 @@ import IOKit
 import IOKit.hid
 
 enum AppleRemoteModel: String {
-    case a1513 = "Siri Remote 第一代 A1513/A1962"
-    case a2540 = "Siri Remote 第二代 A2540"
-    case a2854 = "Siri Remote 第三代 A2854"
-    case unknown = "Apple Remote（未知型号）"
+    case a1513, a2540, a2854, unknown
+
+    /// Localized display name (e.g. "Siri Remote 第三代 A2854" / "Siri Remote 3rd gen A2854").
+    var displayName: String { tr("model.\(rawValue)") }
 
     static func identify(productID: Int) -> AppleRemoteModel {
         switch productID {
@@ -23,22 +23,13 @@ enum AppleRemoteModel: String {
         default: return .unknown
         }
     }
-
-    var imageName: String {
-        switch self {
-        case .a1513: return "03-04_Siri_Remote_A1513_A1962.png"
-        case .a2540: return "05_Siri_Remote_A2540.png"
-        case .a2854: return "06_Siri_Remote_A2854.png"
-        case .unknown: return "06_Siri_Remote_A2854.png"
-        }
-    }
 }
 
-/// Append diagnostic line to /tmp/mavrick.log (unified-log redacts NSLog under hardened runtime).
+/// Append diagnostic line to /tmp/wand.log (unified-log redacts NSLog under hardened runtime).
 func rmDebug(_ msg: String) {
     let line = "\(Date()) \(msg)\n"
     if let data = line.data(using: .utf8) {
-        let path = "/tmp/mavrick.log"
+        let path = "/tmp/wand.log"
         if let fh = FileHandle(forWritingAtPath: path) {
             fh.seekToEndOfFile()
             fh.write(data)
@@ -57,7 +48,7 @@ class RemoteDetector {
     // Track devices by vendorID:productID combination
     // A single physical Siri Remote may expose multiple HID interfaces, but we only want to process one
     private var processedDeviceKeys: Set<String> = []
-    private let processingQueue = DispatchQueue(label: "com.mavrick.deviceProcessing")
+    private let processingQueue = DispatchQueue(label: "com.wand.deviceProcessing")
     
     private let appleVendorID: Int = 0x004C
     

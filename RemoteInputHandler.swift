@@ -1,6 +1,6 @@
 //
 //  RemoteInputHandler.swift
-//  Mavrick
+//  Wand
 //
 //  Processes HID input events from Siri Remote
 //
@@ -18,10 +18,13 @@ class RemoteInputHandler {
 
     /// Serial queue to stagger HID device seizes. Seizing multiple interfaces of the
     /// same Bluetooth peripheral in rapid succession can crash the BT HID stack.
-    private let seizeQueue = DispatchQueue(label: "com.mavrick.seize")
+    private let seizeQueue = DispatchQueue(label: "com.wand.seize")
     /// Devices waiting to be seized, protected by seizeQueue (serial).
     private var pendingDevices: [IOHIDDevice] = []
     private var seizeTimerActive = false
+    /// Bumped on each disconnect (on seizeQueue). Delayed seizes capture it at dispatch and
+    /// abort if it changed — a disconnect mid-delay must not resurrect the interface.
+    private var connectionGeneration = 0
 
     /// Called on any button activity; use to trigger trackpad re-scan after remote wake.
     var onButtonActivity: (() -> Void)?
@@ -35,11 +38,6 @@ class RemoteInputHandler {
     // Prevent double-processing with MediaKeyInterceptor
     static var lastProcessedButton: String?
     static var lastProcessedTime: UInt64 = 0
-
-    /// Virtual keys currently held down, keyed by the HID button that initiated the hold.
-    /// Captured at press time so release can fire the correct keyUp even if the user
-    /// rebinds the button mid-hold. Cleared on device removal to avoid stuck modifiers.
-    private var heldKeys: [String: (keyCode: Int, flags: CGEventFlags)] = [:]
 
     /// Last observed pressed/released state per button. The Siri Remote mirrors each logical
     /// button across multiple HID interfaces (6 seized here), so every physical press/release
@@ -59,13 +57,20 @@ class RemoteInputHandler {
     
     func setRemoteDevice(_ device: IOHIDDevice?) {
         guard let device = device else {
-            // Cancel pending seizes and drain queue
+            // Cancel pending seizes and drain queue. Bumping the generation also invalidates
+            // any seize already dispatched into its 150ms delay — it re-checks on wake.
             seizeQueue.async { [weak self] in
-                self?.pendingDevices.removeAll()
-                self?.seizeTimerActive = false
+                guard let self = self else { return }
+                self.connectionGeneration += 1
+                self.pendingDevices.removeAll()
+                self.seizeTimerActive = false
             }
             releaseSelectIfNeeded(reason: "device removed")
-            releaseAllHeldKeys()
+            buttonState.removeAll()
+            // A single click parked awaiting double-click resolution must not fire after
+            // the remote is gone.
+            for (_, work) in pendingSingleClicks { work.cancel() }
+            pendingSingleClicks.removeAll()
             for d in devices {
                 IOHIDDeviceRegisterInputValueCallback(d, nil, nil)
                 IOHIDDeviceUnscheduleFromRunLoop(d, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
@@ -93,15 +98,21 @@ class RemoteInputHandler {
     }
 
     /// Pick the next device from the pending queue and seize it with a 150ms delay.
+    /// The captured generation invalidates the delayed seize if a disconnect happened while
+    /// it was waiting — otherwise it would seize an interface the UI already considers gone.
     private func drainNext() {
         guard !pendingDevices.isEmpty else {
             seizeTimerActive = false
             return
         }
         let device = pendingDevices.removeFirst()
+        let gen = connectionGeneration
         seizeQueue.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
-            self?.seizeDeviceNow(device)
-            self?.drainNext()
+            guard let self = self else { return }
+            if self.connectionGeneration == gen {
+                self.seizeDeviceNow(device)
+            }
+            self.drainNext()
         }
     }
 
@@ -117,24 +128,28 @@ class RemoteInputHandler {
             rmDebug(String(format: "🔒 SEIZED HID device (vendor=0x%X product=0x%X)",
                           vendor, product))
             DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                IOHIDDeviceRegisterInputValueCallback(device, inputValueCallback, Unmanaged.passUnretained(self).toOpaque())
-                IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-                self.devices.append(device)
-                self.isFirstPressAfterConnection = true
+                self?.attachSeizedDevice(device)
             }
         } else {
             rmDebug(String(format: "⚠️ FAILED to seize HID device (IOReturn=0x%X) — opening unseized", openResult))
             if IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess {
                 DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    IOHIDDeviceRegisterInputValueCallback(device, inputValueCallback, Unmanaged.passUnretained(self).toOpaque())
-                    IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-                    self.devices.append(device)
-                    self.isFirstPressAfterConnection = true
+                    self?.attachSeizedDevice(device)
                 }
             }
         }
+    }
+
+    /// Register callbacks for an opened interface (main thread). The first-press guard is armed
+    /// only for the FIRST interface of a connection — the remote mirrors buttons across ~6
+    /// interfaces seized 150ms apart, and re-arming on each one would swallow a real keypress
+    /// made up to ~1s after connect.
+    private func attachSeizedDevice(_ device: IOHIDDevice) {
+        IOHIDDeviceRegisterInputValueCallback(device, inputValueCallback, Unmanaged.passUnretained(self).toOpaque())
+        IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        let isFirstInterface = devices.isEmpty
+        devices.append(device)
+        if isFirstInterface { isFirstPressAfterConnection = true }
     }
 
     private func releaseSelectIfNeeded(reason: String) {
@@ -185,15 +200,21 @@ class RemoteInputHandler {
             return
         }
 
+        // Trackpad direction clicks (Menu Up/Down/Left/Right) nudge the cursor.
+        if buttonName.hasPrefix("dpad") {
+            handleDpad(buttonName, pressed: intValue == 1)
+            return
+        }
+
         let pressed = (intValue == 1)
 
-        // Debounce only on press — release just closes an existing hold.
+        // Debounce only on press — actions fire on press, release does nothing.
         if pressed {
             RemoteInputHandler.lastProcessedButton = buttonName
             RemoteInputHandler.lastProcessedTime = mach_absolute_time()
         }
 
-        let action = menuBarManager?.getMapping(for: buttonName) ?? ButtonAction.none
+        let action = menuBarManager?.getMapping(for: buttonName) ?? RemoteAction.none
         if pressed {
             print("🔘 Button pressed: \(buttonName) → \(action.rawValue)")
         }
@@ -218,7 +239,23 @@ class RemoteInputHandler {
             }
         }
     }
-    
+
+    /// Each trackpad direction click nudges the cursor by the user-tunable step. Discrete taps
+    /// only — the remote sends one press/release per click, no auto-repeat, so no held-move.
+    private func handleDpad(_ name: String, pressed: Bool) {
+        guard pressed else { return }   // act on the click, ignore the release
+        let step = menuBarManager?.dpadStep ?? 20
+        var dx: CGFloat = 0, dy: CGFloat = 0
+        switch name {
+        case "dpadUp":    dy = -step
+        case "dpadDown":  dy =  step
+        case "dpadLeft":  dx = -step
+        case "dpadRight": dx =  step
+        default: return
+        }
+        cursorController.moveCursor(deltaX: dx, deltaY: dy)
+    }
+
     // MARK: - Button Identification
     
     private func identifyButton(page: UInt32, usage: UInt32) -> String? {
@@ -232,6 +269,10 @@ class RemoteInputHandler {
         case (0x0C, 0x60): return "tv"            // TV button (actual)
         case (0x0C, 0x80): return "select"        // Selection
         case (0x0C, 0x41): return "select"        // Menu Select (alternative)
+        case (0x0C, 0x42): return "dpadUp"        // Menu Up — 触控板上方向点击
+        case (0x0C, 0x43): return "dpadDown"      // Menu Down — 下方向点击
+        case (0x0C, 0x44): return "dpadLeft"      // Menu Left — 左方向点击
+        case (0x0C, 0x45): return "dpadRight"     // Menu Right — 右方向点击
         case (0x0C, 0xCD): return "playPause"     // Play/Pause
         case (0x0C, 0xE9): return "volumeUp"      // Volume Increment
         case (0x0C, 0xEA): return "volumeDown"    // Volume Decrement
@@ -242,7 +283,6 @@ class RemoteInputHandler {
         case (0x0C, 0x40): return "menu"          // Menu
         case (0x0C, 0x30): return "power"         // Power
         case (0x0C, 0x20): return "mute"          // Mute (some remotes)
-        case (0x0C, 0x43): return "mute"          // Mute (new silver Siri Remote)
         case (0x0C, 0xE2): return "mute"          // HID Consumer Mute (silver Siri Remote)
         
         // Button Page (0x09)
@@ -264,7 +304,7 @@ class RemoteInputHandler {
     
     // MARK: - Action Execution
     
-    private func executeAction(_ action: ButtonAction, button: String, pressed: Bool, bypassDouble: Bool = false) {
+    private func executeAction(_ action: RemoteAction, button: String, pressed: Bool, bypassDouble: Bool = false) {
         if !bypassDouble, pressed,
            let manager = menuBarManager,
            manager.getDoubleClickMapping(for: button) != .none {
@@ -277,130 +317,22 @@ class RemoteInputHandler {
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 self.pendingSingleClicks.removeValue(forKey: button)
-                if !action.requiresHold {
-                    self.executeAction(action, button: button, pressed: true, bypassDouble: true)
-                }
+                self.executeAction(action, button: button, pressed: true, bypassDouble: true)
             }
             pendingSingleClicks[button] = work
             DispatchQueue.main.asyncAfter(deadline: .now() + doubleClickInterval, execute: work)
-            if !action.requiresHold { return }
-        }
-        if action.requiresHold {
-            handleHoldAction(action, button: button, pressed: pressed)
             return
         }
-        // Tap actions fire once, on press only.
+        // Every action is a single tap now, fired on press only.
         guard pressed else { return }
-        switch action {
-        case .none:
-            break
-        case .enterKey:
-            sendKey(kVK_Return)
-        case .tabKey:
-            sendKey(kVK_Tab)
-        case .upKey:
-            sendKey(kVK_UpArrow)
-        case .downKey:
-            sendKey(kVK_DownArrow)
-        case .escKey:
-            sendKey(kVK_Escape)
-        case .ctrlC:
-            sendKey(kVK_ANSI_C, flags: .maskControl)
-        case .spaceKey, .fnKey, .leftCtrl, .rightCtrl, .leftCmd, .rightCmd,
-             .leftShift, .rightShift, .rightOpt:
-            break // handled by handleHoldAction
-        case .trackpadClick:
+        // Click goes through the shared cursor state so it stays consistent with the trackpad path.
+        if action == .leftClick {
             cursorController.performClick()
-        case .customShortcut:
-            if let shortcut = menuBarManager?.learnedShortcut(for: button) {
-                sendKey(Int(shortcut.keyCode), flags: shortcut.cgFlags)
-            }
-        case .customText:
-            menuBarManager?.executeTextAction(for: button)
-        }
-    }
-
-    /// Press/release a virtual key mirroring the HID press duration (push-to-talk).
-    private func handleHoldAction(_ action: ButtonAction, button: String, pressed: Bool) {
-        // Fn key uses flagsChanged events — the macOS Fn/Globe key is a modifier, not a
-        // regular key. Posting keyDown/keyUp for kVK_Function is silently ignored by most apps.
-        if action == .fnKey {
-            if pressed {
-                if heldKeys.removeValue(forKey: button) != nil {
-                    postFnKey(down: false)
-                }
-                postFnKey(down: true)
-                heldKeys[button] = (kVK_Function, .maskSecondaryFn)
-            } else {
-                guard heldKeys.removeValue(forKey: button) != nil else { return }
-                postFnKey(down: false)
-            }
             return
         }
-
-        let spec: (keyCode: Int, flags: CGEventFlags)
-        switch action {
-        case .spaceKey: spec = (kVK_Space,        [])
-        case .leftCtrl: spec = (kVK_Control,       .maskControl)
-        case .rightCtrl: spec = (kVK_RightControl, .maskControl)
-        case .leftCmd: spec = (kVK_Command,        .maskCommand)
-        case .rightCmd: spec = (kVK_RightCommand, .maskCommand)
-        case .leftShift: spec = (kVK_Shift,        .maskShift)
-        case .rightShift: spec = (kVK_RightShift,  .maskShift)
-        case .rightOpt: spec = (kVK_RightOption,  .maskAlternate)
-        default: return
-        }
-
-        if pressed {
-            // Defensive: if a prior release was missed, close the stale hold before opening a new one.
-            if let stale = heldKeys.removeValue(forKey: button) {
-                postKey(keyCode: stale.keyCode, flags: [], keyDown: false)
-            }
-            postKey(keyCode: spec.keyCode, flags: spec.flags, keyDown: true)
-            heldKeys[button] = spec
-        } else {
-            guard let held = heldKeys.removeValue(forKey: button) else { return }
-            postKey(keyCode: held.keyCode, flags: [], keyDown: false)
-        }
-    }
-
-    /// Post a flagsChanged event for the Fn/Globe key.
-    /// Down: sets .maskSecondaryFn (0x800000) — the same bit apps like WeChat watch for.
-    /// Up: clears flags to release the modifier.
-    private func postFnKey(down: Bool) {
-        let src = CGEventSource(stateID: .hidSystemState)
-        if let event = CGEvent(source: src) {
-            event.type = .flagsChanged
-            event.setIntegerValueField(.keyboardEventKeycode, value: Int64(kVK_Function))
-            event.flags = down ? .maskSecondaryFn : []
-            event.post(tap: .cghidEventTap)
-        }
-    }
-
-    /// Called on device removal to avoid stuck modifiers if the remote disconnects mid-hold.
-    private func releaseAllHeldKeys() {
-        for (_, held) in heldKeys {
-            if held.flags == .maskSecondaryFn {
-                postFnKey(down: false)
-            } else {
-                postKey(keyCode: held.keyCode, flags: [], keyDown: false)
-            }
-        }
-        heldKeys.removeAll()
-        buttonState.removeAll()
-    }
-
-    private func postKey(keyCode: Int, flags: CGEventFlags, keyDown: Bool) {
-        let src = CGEventSource(stateID: .hidSystemState)
-        let event = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(keyCode), keyDown: keyDown)
-        event?.flags = flags
-        event?.post(tap: .cghidEventTap)
-    }
-
-    private func sendKey(_ keyCode: Int, flags: CGEventFlags = []) {
-        postKey(keyCode: keyCode, flags: flags, keyDown: true)
-        usleep(10000)
-        postKey(keyCode: keyCode, flags: flags, keyDown: false)
+        // `button` is already the MappingTarget.storageKey ("siri", "double:siri"), which is
+        // what execute needs to resolve the data-backed actions.
+        menuBarManager?.execute(action, storageKey: button)
     }
 }
 

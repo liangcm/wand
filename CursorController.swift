@@ -1,6 +1,6 @@
 //
 //  CursorController.swift
-//  Mavrick
+//  Wand
 //
 //  Controls cursor movement and clicking using CGEvent
 //
@@ -55,22 +55,29 @@ class CursorController {
     }
 
     private func currentCursorPosition() -> CGPoint {
+        let real = CGEvent(source: nil)?.location
+
+        // The cache smooths our own event stream, but the user may have moved the cursor with
+        // the built-in trackpad/mouse since we last posted — if the real cursor has drifted
+        // away from what we posted, the cache is stale and must be dropped, or the next remote
+        // move would yank the cursor back to the old spot.
         if let cached = lastPostedCursorPosition,
            Date().timeIntervalSince(lastPostedCursorPositionTime) < remotePositionCacheInterval {
+            if let real = real, hypot(real.x - cached.x, real.y - cached.y) > 8 {
+                return real
+            }
             return cached
         }
 
-        if let event = CGEvent(source: nil) {
-            return event.location
+        if let real = real {
+            return real
         }
 
+        // Last-resort Cocoa→Quartz flip. Quartz's origin is anchored to the PRIMARY display
+        // (screens.first), not NSScreen.main (the key window's screen).
         let nsLocation = NSEvent.mouseLocation
-        if let mainScreen = NSScreen.main {
-            let mainFrame = mainScreen.frame
-            return CGPoint(
-                x: mainFrame.minX + nsLocation.x,
-                y: mainFrame.minY + (mainFrame.height - nsLocation.y)
-            )
+        if let primary = NSScreen.screens.first {
+            return CGPoint(x: nsLocation.x, y: primary.frame.height - nsLocation.y)
         }
         return CGPoint(x: nsLocation.x, y: nsLocation.y)
     }

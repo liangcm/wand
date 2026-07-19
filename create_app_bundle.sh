@@ -4,7 +4,7 @@
 
 set -e
 
-APP_NAME="Mavrick"
+APP_NAME="Wand"
 APP_BUNDLE="${APP_NAME}.app"
 
 if [ ! -f "$APP_NAME" ]; then
@@ -25,18 +25,12 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources"
 cp "$BINARY_NAME" "${APP_BUNDLE}/Contents/MacOS/$APP_NAME"
 
 # Copy icon if it exists
-if [ -f "Mavrick.icns" ]; then
-    cp "Mavrick.icns" "${APP_BUNDLE}/Contents/Resources/Mavrick.icns"
+if [ -f "Wand.icns" ]; then
+    cp "Wand.icns" "${APP_BUNDLE}/Contents/Resources/Wand.icns"
     echo "Icon added to app bundle"
 elif [ -f "SiriRemote.icns" ]; then
-    cp "SiriRemote.icns" "${APP_BUNDLE}/Contents/Resources/Mavrick.icns"
+    cp "SiriRemote.icns" "${APP_BUNDLE}/Contents/Resources/Wand.icns"
     echo "Icon added to app bundle"
-fi
-
-# Copy menu bar icon resources
-if [ -d "Resources" ]; then
-    cp Resources/MenuBarIcon*.png "${APP_BUNDLE}/Contents/Resources/" 2>/dev/null || true
-    echo "Menu bar icons added to app bundle"
 fi
 
 # Copy localized strings into the app bundle.
@@ -45,11 +39,6 @@ for LPROJ in en.lproj zh-Hans.lproj; do
         cp -R "$LPROJ" "${APP_BUNDLE}/Contents/Resources/"
     fi
 done
-
-if [ -d "Apple_Remote_历代型号高清图" ]; then
-    mkdir -p "${APP_BUNDLE}/Contents/Resources/RemoteModels"
-    cp "Apple_Remote_历代型号高清图"/*.png "${APP_BUNDLE}/Contents/Resources/RemoteModels/"
-fi
 
 # Create proper Info.plist with all required keys
 echo "Creating Info.plist..."
@@ -63,7 +52,7 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 	<key>CFBundleExecutable</key>
 	<string>$APP_NAME</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.mavrick.app</string>
+	<string>com.wand.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -75,9 +64,9 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleIconFile</key>
-	<string>Mavrick</string>
+	<string>Wand</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 Mavrick Contributors</string>
+	<string>Copyright © 2026 Wand Contributors</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>11.0</string>
 	<key>LSUIElement</key>
@@ -85,9 +74,9 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Mavrick needs Bluetooth access to connect to your Siri Remote trackpad.</string>
+	<string>Wand needs Bluetooth access to connect to your Siri Remote trackpad.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Mavrick needs Bluetooth access to connect to your Siri Remote trackpad.</string>
+	<string>Wand needs Bluetooth access to connect to your Siri Remote trackpad.</string>
 </dict>
 </plist>
 EOF
@@ -98,13 +87,18 @@ chmod +x "${APP_BUNDLE}/Contents/MacOS/$APP_NAME"
 # Sign with hardened runtime + entitlements. Required on modern macOS (14+) for
 # IOHIDManager to deliver Bluetooth HID devices like the Siri Remote to the app.
 # Ad-hoc (`--sign -`) is used; for distribution, swap in a Developer ID identity.
-if [ -f "Mavrick.entitlements" ]; then
+if [ -f "Wand.entitlements" ]; then
     echo "Signing with hardened runtime + entitlements..."
     codesign --force --options=runtime \
-        --entitlements "Mavrick.entitlements" \
+        --entitlements "Wand.entitlements" \
         --sign - \
         "${APP_BUNDLE}"
     codesign -dvv "${APP_BUNDLE}" 2>&1 | grep -E "(flags|Identifier)" || true
+else
+    # Signing is not optional — without the bluetooth entitlement, IOHIDManager won't
+    # deliver the Siri Remote on macOS 14+. Fail loudly instead of shipping a broken app.
+    echo "ERROR: Wand.entitlements not found — cannot sign. Aborting." >&2
+    exit 1
 fi
 
 echo ""

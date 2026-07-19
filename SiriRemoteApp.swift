@@ -1,6 +1,6 @@
 //
 //  SiriRemoteApp.swift
-//  Mavrick
+//  Wand
 //
 //  Menu bar application for controlling Mac with Siri Remote
 //
@@ -19,9 +19,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var remoteInputHandler: RemoteInputHandler?
     private var mediaKeyInterceptor: MediaKeyInterceptor?
     private var touchHandler: TouchHandler?
-    
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("🚀 Mavrick starting...")
+        print("🚀 Wand starting...")
 
         // Bluetooth AVRCP play/pause signals bypass cghidEventTap and reach com.apple.rcd
         // directly, which launches Music.app. Suspend rcd for this session; restored on exit.
@@ -61,6 +61,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         touchHandler?.onSwipe = { [weak menuBarManager] direction in
             menuBarManager?.executeSwipe(direction)
         }
+        // Multi-finger (≥3) pinch-in opens the remote control panel. Detection accepts 3+
+        // because the small trackpad reports a 4th contact unreliably.
+        touchHandler?.onPinch = { [weak menuBarManager] in
+            menuBarManager?.showRemotePanel()
+        }
+        // Tap-to-click respects the panel toggle, read live on each tap.
+        touchHandler?.isTapEnabled = { [weak menuBarManager] in
+            menuBarManager?.tapToClickEnabled ?? true
+        }
         touchHandler?.start()
         remoteInputHandler?.onButtonActivity = { [weak self] in
             self?.touchHandler?.tryReconnectTrackpad()
@@ -93,6 +102,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return self.handleInterceptedMediaKey(keyType)
         }
         mediaKeyInterceptor?.start()
+
+        // Install the CoreAudio volume listener + baseline now, so the first remote volume
+        // press already has something to revert AVRCP's system-volume change to.
+        VolumeRevertGuard.shared.prewarm()
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -151,10 +164,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        let action = menuBarManager.getMapping(for: buttonName)
-        if action != .none {
-            menuBarManager.executeAction(action.rawValue)
-        }
+        menuBarManager.execute(menuBarManager.getMapping(for: buttonName), storageKey: buttonName)
         // Always consume — no action in this app corresponds to a system media key anymore,
         // so we never want macOS's default media handler to fire.
         return true
@@ -171,7 +181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 /// Suspends `com.apple.rcd` (Remote Control Daemon) for the user's GUI launchd domain while
-/// Mavrick is running. rcd is what reacts to Bluetooth AVRCP play signals by launching
+/// Wand is running. rcd is what reacts to Bluetooth AVRCP play signals by launching
 /// Music.app — a channel that bypasses HID seize and the cghidEventTap entirely. `bootout`
 /// only affects this login session; restored on clean exit, and on next login either way.
 enum RCDControl {

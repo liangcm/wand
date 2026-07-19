@@ -1,42 +1,109 @@
+/* Menu bar */
 "menu.title" = "Siri Remote";
-"menu.buttonMappings" = "Button Mappings";
-"menu.swipeGestures" = "Swipe Gestures";
-"menu.quit" = "Quit";
+"menu.openPanel" = "Open Remote Panel…";
+"menu.quit" = "Quit Wand";
 "status.connected" = "Status: Connected ✓";
 "status.disconnected" = "Status: Disconnected";
-"button.select" = "Trackpad Click";
-"button.menu" = "Menu Button";
+
+/* Remote button names (panel canvas + current selection) */
+"button.select" = "Trackpad Center Click";
+"button.menu" = "Back Button";
 "button.tv" = "TV Button";
-"button.siri" = "Siri Button";
-"button.playPause" = "Play/Pause Button";
+"button.siri" = "Side Siri/Voice Button";
+"button.playPause" = "Play/Pause";
 "button.volumeUp" = "Volume Up";
 "button.volumeDown" = "Volume Down";
-"button.power" = "Power Button";
-"button.mute" = "Mute Button";
-"button.action.enterKey" = "Enter: Submit prompt";
-"button.action.tabKey" = "Tab: Autocomplete / Accept suggestion";
-"button.action.upKey" = "Up: Navigate Up";
-"button.action.downKey" = "Down: Navigate Down";
-"button.action.escKey" = "Esc: Navigate Back";
-"button.action.ctrlC" = "Control + C: Cancel Prompt";
-"button.action.spaceKey" = "Space: Claude Voice Dictation";
-"button.action.fnKey" = "Fn: WeChat / 3rd-party Voice Input";
-"button.action.leftCtrl" = "Left Control";
-"button.action.rightCtrl" = "Right Control";
-"button.action.leftCmd" = "Left Command";
-"button.action.rightCmd" = "Right Command";
-"button.action.leftShift" = "Left Shift";
-"button.action.rightShift" = "Right Shift";
-"button.action.rightOpt" = "Right Option: 3rd-party Voice Dictation";
-"button.action.customShortcut" = "Learned Keyboard Shortcut";
-"button.action.customText" = "Custom Text or Command";
-"button.action.trackpadClick" = "Mouse Click";
-"button.action.none" = "None";
+"button.mute" = "Mute";
+"button.power" = "Power";
+
+/* Swipe gesture names */
 "swipe.up" = "Swipe Up";
 "swipe.down" = "Swipe Down";
 "swipe.left" = "Swipe Left";
 "swipe.right" = "Swipe Right";
-"swipe.action.leftArrow" = "Left: Navigate Left";
-"swipe.action.rightArrow" = "Right: Navigate Right";
-"swipe.action.modeSwitch" = "Mode Switching (Shift + Tab)";
-"swipe.action.none" = "None";
+
+/* Action display names (language-specific subset; Enter/F1/Cmd+C etc. are language-neutral) */
+"action.up" = "↑ Up";
+"action.down" = "↓ Down";
+"action.left" = "← Left";
+"action.right" = "→ Right";
+"action.leftCtrl" = "Left Ctrl";
+"action.rightCtrl" = "Right Ctrl";
+"action.leftCmd" = "Left Cmd";
+"action.rightCmd" = "Right Cmd";
+"action.leftOpt" = "Left Opt";
+"action.rightOpt" = "Right Opt";
+"action.leftShift" = "Left Shift";
+"action.rightShift" = "Right Shift";
+"action.leftClick" = "Left Click";
+"action.rightClick" = "Right Click";
+"action.learnedShortcut" = "Learned Shortcut";
+"action.customText" = "Text or Command";
+"action.openApp" = "Open App";
+"action.none" = "None";
+/* %@ = app name, e.g. "Open Safari" */
+"button.action.openApp.named" = "Open %@";
+
+/* Remote models */
+"model.a1513" = "Siri Remote 1st gen A1513/A1962";
+"model.a2540" = "Siri Remote 2nd gen A2540";
+"model.a2854" = "Siri Remote 3rd gen A2854";
+"model.unknown" = "Apple Remote (unknown model)";
+
+/* Remote panel */
+"panel.title" = "Wand Remote Panel";
+"panel.inspectorTitle" = "Key Settings";
+"panel.clickMode.single" = "Single Click";
+"panel.clickMode.double" = "Double Click";
+"panel.currentSelection" = "Current Selection";
+"panel.mappingCaption" = "Key Mapping";
+"panel.help.selectLocked" = "The trackpad center click is fixed to mouse click / hold-to-drag and cannot be changed.";
+"panel.help.button" = "The selected action runs when this key is pressed.";
+"panel.help.swipe" = "The selected action runs on a quick trackpad swipe.";
+"panel.help.learning" = "Learning: press e.g. Command + K, Shift + Tab, or a single key.";
+"panel.learnButton" = "Learn Keyboard Shortcut…";
+"panel.learnButton.active" = "Press a key or combo… (Esc to cancel)";
+"panel.textButton" = "Type Text or Command…";
+"panel.appButton" = "Open App…";
+"panel.sensitivity" = "Mouse Sensitivity";
+"panel.tapToClick" = "Tap to Click";
+"panel.accessibilitySettings" = "Accessibility Settings…";
+"panel.resetDefaults" = "Reset to Defaults";
+"panel.done" = "Done";
+"panel.connected" = "Siri Remote Connected";
+"panel.disconnected" = "Siri Remote Not Connected";
+"panel.ax.granted" = "Accessibility: Granted";
+"panel.ax.denied" = "Accessibility: Not Granted";
+"panel.ax.tooltip.granted" = "Wand can generate keyboard and mouse events";
+"panel.ax.tooltip.denied" = "Click to grant access in System Settings";
+"panel.category.functionKeys" = "Function Keys";
+"panel.category.fKeys" = "F-Keys";
+"panel.category.combos" = "Key Combos";
+
+/* Alerts */
+"alert.save" = "Save";
+"alert.cancel" = "Cancel";
+"alert.text.title" = "Type Text or Command";
+"alert.text.message" = "e.g. /compact — choose what happens after the text is typed.";
+"alert.text.suffix.none" = "Append Nothing";
+"alert.text.suffix.space" = "Append Space";
+"alert.text.suffix.enter" = "Append Enter";
+"alert.app.title" = "Open App";
+"alert.app.message" = "Choose the app to open when this input is pressed.";
+"alert.app.other" = "Choose Other…";
+"alert.app.panelTitle" = "Choose an App";
+"alert.app.panelPrompt" = "Choose";
+
+/* Canvas */
+"canvas.click" = "Click";
+
+/* Learned-shortcut key names */
+"key.modifier" = "Modifier";
+"key.leftControl" = "Left Control";
+"key.rightControl" = "Right Control";
+"key.leftCommand" = "Left Command";
+"key.rightCommand" = "Right Command";
+"key.leftShift" = "Left Shift";
+"key.rightShift" = "Right Shift";
+"key.leftOption" = "Left Option";
+"key.rightOption" = "Right Option";

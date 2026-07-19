@@ -1,6 +1,6 @@
 //
 //  TouchHandler.swift
-//  Mavrick
+//  Wand
 //
 //  Handles Siri Remote trackpad input using Apple's private MultitouchSupport.framework
 //
@@ -64,8 +64,22 @@ class TouchHandler {
     private let swipeAxisRatio: CGFloat = 2.0
     private var hadMultipleFingersInSession = false
 
+    // Multi-finger pinch-in detection. Scale-free: we track each touch's mean distance to the
+    // group centroid ("spread") within a session and fire when it collapses to a fraction of
+    // the peak seen. Using ≥3 fingers rather than exactly 4 because the Siri Remote's small
+    // trackpad reports the 4th contact unreliably — a 4-finger pinch still registers this way.
+    private let pinchMinFingers = 3
+    private let pinchMinPeakSpread: CGFloat = 0.03   // must have genuinely spread out first
+    private let pinchCollapseRatio: CGFloat = 0.55   // spread must fall to ≤55% of its peak
+    private var pinchPeakSpread: CGFloat = 0
+    private var pinchFired = false
+
     /// Fired on touch-up when a single-finger flick is detected. Dispatched on main.
     var onSwipe: ((SwipeDirection) -> Void)?
+    /// Fired mid-gesture when a multi-finger pinch-in is detected. Dispatched on main.
+    var onPinch: (() -> Void)?
+    /// Returns whether tap-to-click is currently enabled; nil defaults to enabled.
+    var isTapEnabled: (() -> Bool)?
     private let reconnectInterval: TimeInterval = 2.0
     private let idleTimeout: TimeInterval = 90.0
     private let touchStarvationThreshold: TimeInterval = 15.0
@@ -257,7 +271,7 @@ class TouchHandler {
         if activeTouchCount >= 2 {
             hadMultipleFingersInSession = true
         }
-        
+
         avgX /= Float(activeTouchCount)
         avgY /= Float(activeTouchCount)
         
@@ -266,13 +280,39 @@ class TouchHandler {
         // Handle touch start
         if lastTouchPosition == nil {
             hadMultipleFingersInSession = false
+            pinchPeakSpread = 0
+            pinchFired = false
             touchStartTime = mach_absolute_time()
             touchStartPosition = currentPos
             lastTouchPosition = currentPos
             lastTouchCount = activeTouchCount
             return
         }
-        
+
+        // Multi-finger pinch-in: fingers spread out, then collapse toward their centroid.
+        // Fires once per session; the ≥3-finger gate keeps it clear of 1-finger cursor and
+        // 2-finger scroll. NOTE: unverified — during testing the Siri Remote trackpad never
+        // emitted touch frames, so this path has never actually run on hardware.
+        if activeTouchCount >= pinchMinFingers && !pinchFired {
+            var spread: CGFloat = 0
+            var counted = 0
+            for i in 0..<count {
+                let t = touchPtr[i]
+                guard t.state == MTTouchStateTouching || t.state == MTTouchStateMakeTouch else { continue }
+                spread += hypot(CGFloat(t.normalizedVector.position.x) - currentPos.x,
+                                CGFloat(t.normalizedVector.position.y) - currentPos.y)
+                counted += 1
+            }
+            if counted > 0 { spread /= CGFloat(counted) }
+            pinchPeakSpread = max(pinchPeakSpread, spread)
+            if pinchPeakSpread >= pinchMinPeakSpread && spread <= pinchPeakSpread * pinchCollapseRatio {
+                pinchFired = true
+                rmDebug(String(format: "🤏 pinch detected (fingers=%d peak=%.3f now=%.3f) → open panel",
+                               activeTouchCount, pinchPeakSpread, spread))
+                DispatchQueue.main.async { [weak self] in self?.onPinch?() }
+            }
+        }
+
         // Calculate delta
         let deltaX = currentPos.x - (lastTouchPosition?.x ?? currentPos.x)
         let deltaY = currentPos.y - (lastTouchPosition?.y ?? currentPos.y)
@@ -304,7 +344,7 @@ class TouchHandler {
     
     private func handleTouchEnd() {
         guard lastTouchPosition != nil else { return }
-        
+
         // Don't trigger tap if physical click button is active
         if cursorController.isClickActive {
             return
@@ -341,6 +381,7 @@ class TouchHandler {
         }
 
         if duration < tapMaxDuration && movement < tapMaxDistance {
+            if isTapEnabled?() == false { return }   // tap-to-click 被用户关闭
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 self.cursorController.performClick()

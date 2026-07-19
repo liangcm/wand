@@ -1,6 +1,6 @@
 //
 //  SystemVolume.swift
-//  Mavrick
+//  Wand
 //
 //  CoreAudio volume read/write + a listener-based revert guard that reverses
 //  AVRCP-origin volume changes during a short window after a remote volume HID press.
@@ -88,6 +88,10 @@ final class VolumeRevertGuard {
     /// volume change landed in the last `settleDelay` ms, reverts it retroactively — this
     /// handles the common case where AVRCP beats HID to the main thread.
     func armFromRemoteButton() {
+        // Defensive: covers the default output device appearing/changing after launch,
+        // when prewarm() found nothing to listen to.
+        ensureListener()
+        if baselineVolume == nil { baselineVolume = SystemVolume.get() }
         guardUntil = Date().addingTimeInterval(guardWindow)
         if pendingSettle != nil, let baselineValue = baselineVolume {
             pendingSettle?.cancel()
