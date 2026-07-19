@@ -36,7 +36,7 @@ Wand is a macOS menu bar app that pairs with the Siri Remote you already own and
 
 ## Install
 
-1. Build the app (see below) or open `Wand-<version>.dmg` and drag **Wand.app** to Applications
+1. Download the notarized DMG from [Releases](https://github.com/wongsiufool/wand/releases) and drag **Wand.app** to Applications (or build from source, see below)
 2. Launch Wand — a remote-shaped icon appears in the menu bar
 3. Grant permissions in **System Settings → Privacy & Security**:
    - **Accessibility** — required to synthesize keyboard/mouse events

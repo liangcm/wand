@@ -36,7 +36,7 @@ Wand 是一个 macOS 菜单栏应用:配对你手上已有的 Siri Remote,把它
 
 ## 安装
 
-1. 自行构建(见下文),或打开 `Wand-<版本>.dmg` 并把 **Wand.app** 拖入「应用程序」
+1. 从 [Releases](https://github.com/wongsiufool/wand/releases) 下载公证版 DMG,把 **Wand.app** 拖入「应用程序」(或自行构建,见下文)
 2. 启动 Wand——菜单栏出现遥控器形状的图标
 3. 在**系统设置 → 隐私与安全性**中授权:
    - **辅助功能** —— 合成键盘/鼠标事件所需
