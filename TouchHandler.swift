@@ -62,6 +62,23 @@ class TouchHandler {
     private let swipeMinDistance: CGFloat = 0.35
     private let swipeMaxDuration: Double = 0.35
     private let swipeAxisRatio: CGFloat = 2.0
+    // Lift-velocity gate: a deliberate flick lifts the finger while it's still moving fast,
+    // whereas cursor gliding decelerates to a stop before lifting. Requiring recent speed at
+    // lift keeps fast cursor moves from misfiring as swipe gestures (which would send the
+    // mapped keys — F1/⌘C/… — into apps that reject them with the system alert sound).
+    private let swipeMinLiftSpeed: CGFloat = 1.2   // trackpad widths per second, EMA-smoothed
+    private var recentSpeed: CGFloat = 0
+    private var lastFrameTimestamp: Double = 0
+    // Isolation gates: moving the cursor across a screen on this tiny pad means BURSTS of fast
+    // strokes (~100-200ms apart) whose lift kinematics match a flick exactly — speed alone can't
+    // tell them apart (measured: cursor strokes lift at 3-5 widths/s too). A deliberate gesture
+    // is an ISOLATED flick: quiet before (no touch for 0.4s) and quiet after (no follow-up
+    // touch within 250ms). Burst strokes fail one or both, so they never fire actions.
+    private let swipeQuietBefore: Double = 0.4
+    private let swipeQuietAfter: Double = 0.25
+    private var lastTouchEndTime: UInt64 = 0
+    private var sessionIsolated = false
+    private var pendingSwipe: DispatchWorkItem?
     private var hadMultipleFingersInSession = false
 
     // Multi-finger pinch-in detection. Scale-free: we track each touch's mean distance to the
@@ -279,9 +296,20 @@ class TouchHandler {
         
         // Handle touch start
         if lastTouchPosition == nil {
+            // A new touch this soon after a swipe candidate means the candidate was one stroke
+            // of a cursor-movement burst, not a gesture — kill it before its delay elapses.
+            if let pending = pendingSwipe {
+                pending.cancel()
+                pendingSwipe = nil
+                rmDebug("👟 swipe 取消（后续触摸到来 → 判定为光标连环划）")
+            }
+            let quiet = lastTouchEndTime == 0 ? Double.infinity : Self.machDeltaToSeconds(from: lastTouchEndTime)
+            sessionIsolated = quiet >= swipeQuietBefore
             hadMultipleFingersInSession = false
             pinchPeakSpread = 0
             pinchFired = false
+            recentSpeed = 0
+            lastFrameTimestamp = timestamp
             touchStartTime = mach_absolute_time()
             touchStartPosition = currentPos
             lastTouchPosition = currentPos
@@ -316,7 +344,16 @@ class TouchHandler {
         // Calculate delta
         let deltaX = currentPos.x - (lastTouchPosition?.x ?? currentPos.x)
         let deltaY = currentPos.y - (lastTouchPosition?.y ?? currentPos.y)
-        
+
+        // Track instantaneous speed (EMA) so touch-end can tell a flick from a glide-then-stop.
+        let dt = timestamp - lastFrameTimestamp
+        if dt > 0 && dt < 0.5 {
+            let v = hypot(deltaX, deltaY) / CGFloat(dt)
+            recentSpeed = 0.7 * recentSpeed + 0.3 * v
+        }
+        lastFrameTimestamp = timestamp
+
+
         // Process based on finger count: 1 finger = cursor, 2 fingers = scroll
         if activeTouchCount == 1 && lastTouchCount == 1 {
             let clamped = moveCursor(deltaX: deltaX, deltaY: deltaY)
@@ -344,6 +381,7 @@ class TouchHandler {
     
     private func handleTouchEnd() {
         guard lastTouchPosition != nil else { return }
+        lastTouchEndTime = mach_absolute_time()
 
         // Don't trigger tap if physical click button is active
         if cursorController.isClickActive {
@@ -373,9 +411,29 @@ class TouchHandler {
                 direction = nil
             }
             if let direction = direction {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onSwipe?(direction)
+                // Gate 1 — lift velocity: the finger must still be moving fast at lift.
+                guard recentSpeed >= swipeMinLiftSpeed else {
+                    rmDebug(String(format: "👟 swipe %@ 拦截（抬手速度 %.2f < %.2f → 移动光标）",
+                                   "\(direction)", recentSpeed, swipeMinLiftSpeed))
+                    return
                 }
+                // Gate 2 — quiet before: a stroke that follows another touch within 0.4s is
+                // part of a cursor-movement burst, not a deliberate gesture.
+                guard sessionIsolated else {
+                    rmDebug(String(format: "👟 swipe %@ 拦截（前静默不足 → 光标连环划）", "\(direction)"))
+                    return
+                }
+                // Gate 3 — quiet after: fire only if no follow-up touch arrives within 250ms.
+                // touch-start cancels this work item, so burst-leading strokes never fire.
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self = self else { return }
+                    self.pendingSwipe = nil
+                    rmDebug(String(format: "👟 swipe %@ 触发（速度 %.2f，距离 %.2f，时长 %.0fms，孤立）",
+                                   "\(direction)", self.recentSpeed, movement, duration * 1000))
+                    self.onSwipe?(direction)
+                }
+                pendingSwipe = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + swipeQuietAfter, execute: work)
                 return
             }
         }
