@@ -15,12 +15,10 @@
 "button.volumeDown" = "音量减";
 "button.mute" = "静音键";
 "button.power" = "电源键";
-
-/* 滑动手势名 */
-"swipe.up" = "向上滑";
-"swipe.down" = "向下滑";
-"swipe.left" = "向左滑";
-"swipe.right" = "向右滑";
+"button.dpadUp" = "上点击";
+"button.dpadDown" = "下点击";
+"button.dpadLeft" = "左点击";
+"button.dpadRight" = "右点击";
 
 /* 动作显示名（语言相关的部分；Enter/F1/Cmd+C 等中英一致，不设 key） */
 "action.up" = "↑ 上";
@@ -37,6 +35,10 @@
 "action.rightShift" = "右 Shift";
 "action.leftClick" = "鼠标左键";
 "action.rightClick" = "鼠标右键";
+"action.cursorUp" = "光标上移";
+"action.cursorDown" = "光标下移";
+"action.cursorLeft" = "光标左移";
+"action.cursorRight" = "光标右移";
 "action.learnedShortcut" = "学习快捷键";
 "action.customText" = "输入文本或命令";
 "action.openApp" = "打开应用";
@@ -59,7 +61,6 @@
 "panel.mappingCaption" = "按键映射";
 "panel.help.selectLocked" = "触控板中心点击固定为鼠标点击 / 按住拖拽，不可更改。";
 "panel.help.button" = "按下该按键时，将执行所选操作。";
-"panel.help.swipe" = "快速滑动触控板时，将执行所选操作。";
 "panel.help.learning" = "正在学习：例如按 Command + K、Shift + Tab 或单个按键。";
 "panel.learnButton" = "学习键盘快捷键…";
 "panel.learnButton.active" = "请按键盘按键或组合键…（Esc 取消）";

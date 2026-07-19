@@ -35,6 +35,7 @@ enum RemoteAction: String, CaseIterable {
     case esc, up, down, left, right
     case leftCtrl, rightCtrl, leftCmd, rightCmd, leftOpt, rightOpt, leftShift, rightShift, fn
     case leftClick, rightClick
+    case cursorUp, cursorDown, cursorLeft, cursorRight   // nudge the mouse cursor（方向环默认动作）
     // 第 2 类 · F 键
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
     // 第 3 类 · 组合键（learnedShortcut = 自定义组合，兜底）
@@ -49,7 +50,7 @@ enum RemoteAction: String, CaseIterable {
         switch self {
         case .enter, .tab, .space, .backspace, .delete, .esc, .up, .down, .left, .right,
              .leftCtrl, .rightCtrl, .leftCmd, .rightCmd, .leftOpt, .rightOpt, .leftShift, .rightShift, .fn,
-             .leftClick, .rightClick:
+             .leftClick, .rightClick, .cursorUp, .cursorDown, .cursorLeft, .cursorRight:
             return .functionKey
         case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
             return .fKey
@@ -83,6 +84,10 @@ enum RemoteAction: String, CaseIterable {
         case .fn: return "Fn"
         case .leftClick: return tr("action.leftClick")
         case .rightClick: return tr("action.rightClick")
+        case .cursorUp: return tr("action.cursorUp")
+        case .cursorDown: return tr("action.cursorDown")
+        case .cursorLeft: return tr("action.cursorLeft")
+        case .cursorRight: return tr("action.cursorRight")
         case .f1: return "F1"; case .f2: return "F2"; case .f3: return "F3"; case .f4: return "F4"
         case .f5: return "F5"; case .f6: return "F6"; case .f7: return "F7"; case .f8: return "F8"
         case .f9: return "F9"; case .f10: return "F10"; case .f11: return "F11"; case .f12: return "F12"
@@ -136,25 +141,17 @@ enum RemoteAction: String, CaseIterable {
     ]
 }
 
-/// Trackpad swipe directions (single-finger flicks). Detection happens in TouchHandler;
-/// execution is dispatched here so mappings live alongside button mappings.
-enum SwipeDirection: String, CaseIterable {
-    case up, down, left, right
-}
-
 /// An input a mapping can be bound to. `storageKey` indexes the side tables that hold the
 /// data for `learnedShortcut` / `customText` / `openApp`; the string form is what the HID
-/// path already passes around, so button and swipe bindings share one namespace.
+/// path already passes around, so both binding kinds share one namespace.
 enum MappingTarget: Hashable {
     case button(String)
     case doubleClick(String)
-    case swipe(SwipeDirection)
 
     var storageKey: String {
         switch self {
         case .button(let key):      return key
         case .doubleClick(let key): return "double:\(key)"
-        case .swipe(let direction): return "swipe:\(direction.rawValue)"
         }
     }
 }
@@ -246,9 +243,6 @@ class MenuBarManager {
     
     // Button mappings (stored in UserDefaults)
     private var buttonMappings: [String: RemoteAction] = [:]
-
-    // Swipe gesture mappings (stored in UserDefaults under "swipeMappings").
-    private var swipeMappings: [SwipeDirection: RemoteAction] = [:]
     private var doubleClickMappings: [String: RemoteAction] = [:]
 
     // Side tables for the data-backed actions, all keyed by MappingTarget.storageKey.
@@ -256,15 +250,12 @@ class MenuBarManager {
     private var textActions: [String: TextActionSpec] = [:]
     private var appActions: [String: String] = [:]   // storageKey -> bundle identifier
 
-    private static let defaultSwipeMappings: [SwipeDirection: RemoteAction] = [
-        .up:    .up,
-        .down:  .down,
-        .left:  .left,
-        .right: .right,
-    ]
-
     // Scroll speed (used for trackpad scroll scale; no menu, native multitouch)
     private(set) var scrollSpeed: ScrollSpeed = .medium
+
+    /// Shared cursor state (owned by the app delegate) so cursor-nudge actions stay consistent
+    /// with the trackpad path — same clamping, same multi-display handling.
+    weak var cursorController: CursorController?
 
     /// How far each trackpad direction click nudges the cursor. User-tunable via the panel slider.
     private(set) var dpadStep: CGFloat = 20
@@ -293,7 +284,9 @@ class MenuBarManager {
         loadDoubleClickMappings()
         loadTextActions()
         loadAppActions()
-        loadSwipeMappings()
+        // Swipe-to-action was removed (gliding is purely cursor movement now) — drop the
+        // stale persisted mappings so they don't linger in the prefs domain.
+        UserDefaults.standard.removeObject(forKey: "swipeMappings")
         if UserDefaults.standard.object(forKey: "dpadStep") != nil {
             dpadStep = CGFloat(UserDefaults.standard.double(forKey: "dpadStep"))
         }
@@ -316,7 +309,7 @@ class MenuBarManager {
         let current = UserDefaults.standard
         guard !current.bool(forKey: "legacyDomainMigrated"),
               let legacy = UserDefaults(suiteName: "com.mavrick.app") else { return }
-        let keys = ["buttonMappings", "swipeMappings", "doubleClickMappings",
+        let keys = ["buttonMappings", "doubleClickMappings",
                     "learnedShortcuts", "textActions", "appActions",
                     "dpadStep", "tapToClickEnabled"]
         var copied: [String] = []
@@ -338,7 +331,12 @@ class MenuBarManager {
             "siri": .space,
             "tv": .ctrlC,
             "power": .none,
-            "mute": .none
+            "mute": .none,
+            // 方向环点击默认平移光标；在面板里可改绑任意动作
+            "dpadUp": .cursorUp,
+            "dpadDown": .cursorDown,
+            "dpadLeft": .cursorLeft,
+            "dpadRight": .cursorRight
         ]
 
         if let saved = UserDefaults.standard.dictionary(forKey: "buttonMappings") as? [String: String] {
@@ -515,7 +513,6 @@ class MenuBarManager {
         switch target {
         case .button(let key):      return buttonMappings[key] ?? .none
         case .doubleClick(let key): return doubleClickMappings[key] ?? .none
-        case .swipe(let direction): return swipeMappings[direction] ?? .none
         }
     }
 
@@ -523,7 +520,6 @@ class MenuBarManager {
         switch target {
         case .button(let key):      buttonMappings[key] = action;      saveMappings()
         case .doubleClick(let key): doubleClickMappings[key] = action; saveDoubleClickMappings()
-        case .swipe(let direction): swipeMappings[direction] = action; saveSwipeMappings()
         }
         rebuildMenu()
     }
@@ -588,9 +584,10 @@ class MenuBarManager {
         buttonMappings = [
             "playPause": .enter, "menu": .esc, "select": .leftClick,
             "volumeUp": .up, "volumeDown": .down, "siri": .space,
-            "tv": .ctrlC, "power": .none, "mute": .none
+            "tv": .ctrlC, "power": .none, "mute": .none,
+            "dpadUp": .cursorUp, "dpadDown": .cursorDown,
+            "dpadLeft": .cursorLeft, "dpadRight": .cursorRight
         ]
-        swipeMappings = Self.defaultSwipeMappings
         // Also clear double-click bindings and every side table, or stale learned shortcuts /
         // text / app bindings would survive a "reset to defaults".
         doubleClickMappings = [:]
@@ -603,7 +600,6 @@ class MenuBarManager {
         UserDefaults.standard.removeObject(forKey: "dpadStep")
         UserDefaults.standard.removeObject(forKey: "tapToClickEnabled")
         saveMappings()
-        saveSwipeMappings()
         saveDoubleClickMappings()
         saveLearnedShortcuts()
         saveTextActions()
@@ -616,40 +612,6 @@ class MenuBarManager {
     }
 
     func getDoubleClickMapping(for button: String) -> RemoteAction { doubleClickMappings[button] ?? .none }
-
-
-    private func loadSwipeMappings() {
-        if let saved = UserDefaults.standard.dictionary(forKey: "swipeMappings") as? [String: String] {
-            for (dirRaw, actionRaw) in saved {
-                if let dir = SwipeDirection(rawValue: dirRaw),
-                   let act = RemoteAction.parse(actionRaw) {
-                    swipeMappings[dir] = act
-                }
-            }
-        }
-        // Fill any missing directions with defaults.
-        for (dir, act) in Self.defaultSwipeMappings where swipeMappings[dir] == nil {
-            swipeMappings[dir] = act
-        }
-        saveSwipeMappings()   // converge migrated rawValues to the new form
-    }
-
-    private func saveSwipeMappings() {
-        var toSave: [String: String] = [:]
-        for (dir, act) in swipeMappings {
-            toSave[dir.rawValue] = act.rawValue
-        }
-        UserDefaults.standard.set(toSave, forKey: "swipeMappings")
-    }
-
-    func getSwipeMapping(for direction: SwipeDirection) -> RemoteAction {
-        return swipeMappings[direction] ?? .none
-    }
-
-    func executeSwipe(_ direction: SwipeDirection) {
-        let target = MappingTarget.swipe(direction)
-        execute(mapping(for: target), storageKey: target.storageKey)
-    }
 
     /// Post the given string as a single keyboard event via `keyboardSetUnicodeString`.
     /// Works across terminals and most text fields; bypasses layout-specific key codes.
@@ -718,6 +680,10 @@ class MenuBarManager {
         case .fn:        sendFnKeyTap()
         case .leftClick: performClick()
         case .rightClick: performRightClick()
+        case .cursorUp:    cursorController?.moveCursor(deltaX: 0, deltaY: -dpadStep)
+        case .cursorDown:  cursorController?.moveCursor(deltaX: 0, deltaY: dpadStep)
+        case .cursorLeft:  cursorController?.moveCursor(deltaX: -dpadStep, deltaY: 0)
+        case .cursorRight: cursorController?.moveCursor(deltaX: dpadStep, deltaY: 0)
         // 第 2 类 · F 键
         case .f1:  sendKey(kVK_F1);  case .f2:  sendKey(kVK_F2);  case .f3:  sendKey(kVK_F3)
         case .f4:  sendKey(kVK_F4);  case .f5:  sendKey(kVK_F5);  case .f6:  sendKey(kVK_F6)

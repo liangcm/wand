@@ -15,12 +15,10 @@
 "button.volumeDown" = "Volume Down";
 "button.mute" = "Mute";
 "button.power" = "Power";
-
-/* Swipe gesture names */
-"swipe.up" = "Swipe Up";
-"swipe.down" = "Swipe Down";
-"swipe.left" = "Swipe Left";
-"swipe.right" = "Swipe Right";
+"button.dpadUp" = "Click Up";
+"button.dpadDown" = "Click Down";
+"button.dpadLeft" = "Click Left";
+"button.dpadRight" = "Click Right";
 
 /* Action display names (language-specific subset; Enter/F1/Cmd+C etc. are language-neutral) */
 "action.up" = "↑ Up";
@@ -37,6 +35,10 @@
 "action.rightShift" = "Right Shift";
 "action.leftClick" = "Left Click";
 "action.rightClick" = "Right Click";
+"action.cursorUp" = "Cursor Up";
+"action.cursorDown" = "Cursor Down";
+"action.cursorLeft" = "Cursor Left";
+"action.cursorRight" = "Cursor Right";
 "action.learnedShortcut" = "Learned Shortcut";
 "action.customText" = "Text or Command";
 "action.openApp" = "Open App";
@@ -59,7 +61,6 @@
 "panel.mappingCaption" = "Key Mapping";
 "panel.help.selectLocked" = "The trackpad center click is fixed to mouse click / hold-to-drag and cannot be changed.";
 "panel.help.button" = "The selected action runs when this key is pressed.";
-"panel.help.swipe" = "The selected action runs on a quick trackpad swipe.";
 "panel.help.learning" = "Learning: press e.g. Command + K, Shift + Tab, or a single key.";
 "panel.learnButton" = "Learn Keyboard Shortcut…";
 "panel.learnButton.active" = "Press a key or combo… (Esc to cancel)";

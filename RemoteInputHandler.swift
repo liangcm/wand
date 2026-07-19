@@ -200,12 +200,6 @@ class RemoteInputHandler {
             return
         }
 
-        // Trackpad direction clicks (Menu Up/Down/Left/Right) nudge the cursor.
-        if buttonName.hasPrefix("dpad") {
-            handleDpad(buttonName, pressed: intValue == 1)
-            return
-        }
-
         let pressed = (intValue == 1)
 
         // Debounce only on press — actions fire on press, release does nothing.
@@ -238,22 +232,6 @@ class RemoteInputHandler {
                 self?.cursorController.isClickActive = false
             }
         }
-    }
-
-    /// Each trackpad direction click nudges the cursor by the user-tunable step. Discrete taps
-    /// only — the remote sends one press/release per click, no auto-repeat, so no held-move.
-    private func handleDpad(_ name: String, pressed: Bool) {
-        guard pressed else { return }   // act on the click, ignore the release
-        let step = menuBarManager?.dpadStep ?? 20
-        var dx: CGFloat = 0, dy: CGFloat = 0
-        switch name {
-        case "dpadUp":    dy = -step
-        case "dpadDown":  dy =  step
-        case "dpadLeft":  dx = -step
-        case "dpadRight": dx =  step
-        default: return
-        }
-        cursorController.moveCursor(deltaX: dx, deltaY: dy)
     }
 
     // MARK: - Button Identification

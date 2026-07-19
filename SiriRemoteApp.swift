@@ -54,13 +54,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             cursorController: cursorController,
             menuBarManager: menuBarManager
         )
+        // Cursor-nudge actions (方向环默认) run through the same controller as the trackpad.
+        menuBarManager.cursorController = cursorController
         
         // Start touch handler for trackpad (before remote detection so we can wire the callback)
         touchHandler = TouchHandler(cursorController: cursorController)
         touchHandler?.scrollScale = menuBarManager.scrollSpeed.scale
-        touchHandler?.onSwipe = { [weak menuBarManager] direction in
-            menuBarManager?.executeSwipe(direction)
-        }
         // Multi-finger (≥3) pinch-in opens the remote control panel. Detection accepts 3+
         // because the small trackpad reports a 4th contact unreliably.
         touchHandler?.onPinch = { [weak menuBarManager] in

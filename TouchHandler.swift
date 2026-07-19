@@ -57,28 +57,6 @@ class TouchHandler {
     private let cursorScale: CGFloat = 500.0
     private let tapMaxDuration: Double = 0.22
     private let tapMaxDistance: CGFloat = 0.07
-    // Swipe detection: velocity-gated single-finger flick. Distance > 35% of trackpad in < 350ms,
-    // with the dominant axis at least 2× the orthogonal axis (rejects diagonal wobble).
-    private let swipeMinDistance: CGFloat = 0.35
-    private let swipeMaxDuration: Double = 0.35
-    private let swipeAxisRatio: CGFloat = 2.0
-    // Lift-velocity gate: a deliberate flick lifts the finger while it's still moving fast,
-    // whereas cursor gliding decelerates to a stop before lifting. Requiring recent speed at
-    // lift keeps fast cursor moves from misfiring as swipe gestures (which would send the
-    // mapped keys — F1/⌘C/… — into apps that reject them with the system alert sound).
-    private let swipeMinLiftSpeed: CGFloat = 1.2   // trackpad widths per second, EMA-smoothed
-    private var recentSpeed: CGFloat = 0
-    private var lastFrameTimestamp: Double = 0
-    // Isolation gates: moving the cursor across a screen on this tiny pad means BURSTS of fast
-    // strokes (~100-200ms apart) whose lift kinematics match a flick exactly — speed alone can't
-    // tell them apart (measured: cursor strokes lift at 3-5 widths/s too). A deliberate gesture
-    // is an ISOLATED flick: quiet before (no touch for 0.4s) and quiet after (no follow-up
-    // touch within 250ms). Burst strokes fail one or both, so they never fire actions.
-    private let swipeQuietBefore: Double = 0.4
-    private let swipeQuietAfter: Double = 0.25
-    private var lastTouchEndTime: UInt64 = 0
-    private var sessionIsolated = false
-    private var pendingSwipe: DispatchWorkItem?
     private var hadMultipleFingersInSession = false
 
     // Multi-finger pinch-in detection. Scale-free: we track each touch's mean distance to the
@@ -91,8 +69,6 @@ class TouchHandler {
     private var pinchPeakSpread: CGFloat = 0
     private var pinchFired = false
 
-    /// Fired on touch-up when a single-finger flick is detected. Dispatched on main.
-    var onSwipe: ((SwipeDirection) -> Void)?
     /// Fired mid-gesture when a multi-finger pinch-in is detected. Dispatched on main.
     var onPinch: (() -> Void)?
     /// Returns whether tap-to-click is currently enabled; nil defaults to enabled.
@@ -296,20 +272,9 @@ class TouchHandler {
         
         // Handle touch start
         if lastTouchPosition == nil {
-            // A new touch this soon after a swipe candidate means the candidate was one stroke
-            // of a cursor-movement burst, not a gesture — kill it before its delay elapses.
-            if let pending = pendingSwipe {
-                pending.cancel()
-                pendingSwipe = nil
-                rmDebug("👟 swipe 取消（后续触摸到来 → 判定为光标连环划）")
-            }
-            let quiet = lastTouchEndTime == 0 ? Double.infinity : Self.machDeltaToSeconds(from: lastTouchEndTime)
-            sessionIsolated = quiet >= swipeQuietBefore
             hadMultipleFingersInSession = false
             pinchPeakSpread = 0
             pinchFired = false
-            recentSpeed = 0
-            lastFrameTimestamp = timestamp
             touchStartTime = mach_absolute_time()
             touchStartPosition = currentPos
             lastTouchPosition = currentPos
@@ -345,14 +310,6 @@ class TouchHandler {
         let deltaX = currentPos.x - (lastTouchPosition?.x ?? currentPos.x)
         let deltaY = currentPos.y - (lastTouchPosition?.y ?? currentPos.y)
 
-        // Track instantaneous speed (EMA) so touch-end can tell a flick from a glide-then-stop.
-        let dt = timestamp - lastFrameTimestamp
-        if dt > 0 && dt < 0.5 {
-            let v = hypot(deltaX, deltaY) / CGFloat(dt)
-            recentSpeed = 0.7 * recentSpeed + 0.3 * v
-        }
-        lastFrameTimestamp = timestamp
-
 
         // Process based on finger count: 1 finger = cursor, 2 fingers = scroll
         if activeTouchCount == 1 && lastTouchCount == 1 {
@@ -381,7 +338,6 @@ class TouchHandler {
     
     private func handleTouchEnd() {
         guard lastTouchPosition != nil else { return }
-        lastTouchEndTime = mach_absolute_time()
 
         // Don't trigger tap if physical click button is active
         if cursorController.isClickActive {
@@ -391,53 +347,14 @@ class TouchHandler {
         if hadMultipleFingersInSession {
             return
         }
-        
+
         let duration = Self.machDeltaToSeconds(from: touchStartTime)
         let dx = (lastTouchPosition?.x ?? 0) - touchStartPosition.x
         let dy = (lastTouchPosition?.y ?? 0) - touchStartPosition.y
         let movement = hypot(dx, dy)
 
-        // Swipe detection (flick). Fires before tap check; distance threshold is well above
-        // tapMaxDistance, so a swipe can never also register as a tap.
-        if duration < swipeMaxDuration && movement > swipeMinDistance {
-            let absDx = abs(dx), absDy = abs(dy)
-            let direction: SwipeDirection?
-            if absDx > absDy * swipeAxisRatio {
-                direction = dx > 0 ? .right : .left
-            } else if absDy > absDx * swipeAxisRatio {
-                // MultitouchSupport reports y increasing toward the top of the trackpad.
-                direction = dy > 0 ? .up : .down
-            } else {
-                direction = nil
-            }
-            if let direction = direction {
-                // Gate 1 — lift velocity: the finger must still be moving fast at lift.
-                guard recentSpeed >= swipeMinLiftSpeed else {
-                    rmDebug(String(format: "👟 swipe %@ 拦截（抬手速度 %.2f < %.2f → 移动光标）",
-                                   "\(direction)", recentSpeed, swipeMinLiftSpeed))
-                    return
-                }
-                // Gate 2 — quiet before: a stroke that follows another touch within 0.4s is
-                // part of a cursor-movement burst, not a deliberate gesture.
-                guard sessionIsolated else {
-                    rmDebug(String(format: "👟 swipe %@ 拦截（前静默不足 → 光标连环划）", "\(direction)"))
-                    return
-                }
-                // Gate 3 — quiet after: fire only if no follow-up touch arrives within 250ms.
-                // touch-start cancels this work item, so burst-leading strokes never fire.
-                let work = DispatchWorkItem { [weak self] in
-                    guard let self = self else { return }
-                    self.pendingSwipe = nil
-                    rmDebug(String(format: "👟 swipe %@ 触发（速度 %.2f，距离 %.2f，时长 %.0fms，孤立）",
-                                   "\(direction)", self.recentSpeed, movement, duration * 1000))
-                    self.onSwipe?(direction)
-                }
-                pendingSwipe = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + swipeQuietAfter, execute: work)
-                return
-            }
-        }
-
+        // Gliding is purely cursor movement — no gesture mappings. The ring's physical
+        // direction CLICKS are the mappable inputs (dpad buttons in RemoteInputHandler).
         if duration < tapMaxDuration && movement < tapMaxDistance {
             if isTapEnabled?() == false { return }   // tap-to-click 被用户关闭
             DispatchQueue.main.async { [weak self] in

@@ -4,7 +4,6 @@ import ApplicationServices
 
 fileprivate enum PanelSelection: Equatable {
     case button(String)
-    case swipe(SwipeDirection)
 }
 
 /// A rounded-rect background whose fill re-resolves on light/dark switches. Assigning a `.cgColor`
@@ -351,13 +350,11 @@ final class RemotePanelController: NSWindowController, NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) { updateAccessibilityStatus() }
 
     /// The mapping target the inspector is currently editing. Buttons honour the single/double
-    /// click segment; a swipe has no double-click variant.
+    /// click segment.
     private var currentTarget: MappingTarget {
         switch selection {
         case .button(let key):
             return clickMode.selectedSegment == 1 ? .doubleClick(key) : .button(key)
-        case .swipe(let direction):
-            return .swipe(direction)
         }
     }
 
@@ -385,12 +382,6 @@ final class RemotePanelController: NSWindowController, NSWindowDelegate {
             // selection is unchanged (clickModeChanged() re-enters here to refresh the menu).
             if selectionChanged { clickMode.selectedSegment = 0 }
             clickMode.isEnabled = !locked
-        case .swipe(let direction):
-            selectionLabel.stringValue = "   \(RemoteCanvasView.swipeName(direction))"
-            helpLabel.stringValue = tr("panel.help.swipe")
-            // A flick has no second tap to time, so the single/double switch doesn't apply.
-            clickMode.selectedSegment = 0
-            clickMode.isEnabled = false
         }
 
         rebuildMappingMenu(for: currentTarget, manager: manager)
@@ -668,10 +659,16 @@ final class RemoteCanvasView: NSView {
         hitAreas.append((padCenter, .button("select")))
         drawText(tr("canvas.click"), at: NSPoint(x: padCenter.midX, y: padCenter.midY - 8), width: 70, align: .center, color: NSColor.white.withAlphaComponent(0.55), size: 11)
 
-        addSwipe(.up, rect: NSRect(x: pad.midX - 34, y: pad.minY, width: 68, height: 38), anchor: NSPoint(x: pad.midX, y: pad.minY), labelPoint: NSPoint(x: pad.midX, y: 15), align: .center)
-        addSwipe(.down, rect: NSRect(x: pad.midX - 34, y: pad.maxY - 38, width: 68, height: 38), anchor: NSPoint(x: pad.midX, y: pad.maxY), labelPoint: NSPoint(x: pad.midX, y: pad.maxY + 16), align: .center)
-        addSwipe(.left, rect: NSRect(x: pad.minX, y: pad.midY - 34, width: 38, height: 68), anchor: NSPoint(x: pad.minX, y: pad.midY), labelPoint: NSPoint(x: remote.minX - 18, y: pad.midY - 8), align: .right)
-        addSwipe(.right, rect: NSRect(x: pad.maxX - 38, y: pad.midY - 34, width: 38, height: 68), anchor: NSPoint(x: pad.maxX, y: pad.midY), labelPoint: NSPoint(x: remote.maxX + 18, y: pad.midY - 8), align: .left)
+        // The clickpad ring's four physical direction-click buttons (dpad), each with a ring
+        // zone plus an outside label. Gliding the pad is purely cursor movement — no mappings.
+        addRingClick("dpadUp",    at: NSPoint(x: pad.midX, y: pad.minY + 25), arrow: "▲",
+                     anchor: NSPoint(x: pad.midX, y: pad.minY), labelPoint: NSPoint(x: pad.midX, y: 15), align: .center)
+        addRingClick("dpadDown",  at: NSPoint(x: pad.midX, y: pad.maxY - 25), arrow: "▼",
+                     anchor: NSPoint(x: pad.midX, y: pad.maxY), labelPoint: NSPoint(x: pad.midX, y: pad.maxY + 16), align: .center)
+        addRingClick("dpadLeft",  at: NSPoint(x: pad.minX + 25, y: pad.midY), arrow: "◀",
+                     anchor: NSPoint(x: pad.minX, y: pad.midY), labelPoint: NSPoint(x: remote.minX - 18, y: pad.midY - 8), align: .right)
+        addRingClick("dpadRight", at: NSPoint(x: pad.maxX - 25, y: pad.midY), arrow: "▶",
+                     anchor: NSPoint(x: pad.maxX, y: pad.midY), labelPoint: NSPoint(x: remote.maxX + 18, y: pad.midY - 8), align: .left)
 
         let leftX = remote.minX + 62, rightX = remote.maxX - 62
         addButton("menu", center: NSPoint(x: leftX, y: remote.minY + 310), symbol: "‹", labelPoint: NSPoint(x: remote.minX - 20, y: remote.minY + 299), align: .right)
@@ -693,10 +690,14 @@ final class RemoteCanvasView: NSView {
         let center = touch.insetBy(dx: 62, dy: 58)
         hitAreas.append((center, .button("select")))
         drawText(tr("canvas.click"), at: NSPoint(x: center.midX, y: center.midY - 8), width: 70, align: .center, color: NSColor.white.withAlphaComponent(0.55), size: 11)
-        addSwipe(.up, rect: NSRect(x: touch.midX - 45, y: touch.minY, width: 90, height: 50), anchor: NSPoint(x: touch.midX, y: touch.minY), labelPoint: NSPoint(x: touch.midX, y: 8), align: .center)
-        addSwipe(.down, rect: NSRect(x: touch.midX - 45, y: touch.maxY - 50, width: 90, height: 50), anchor: NSPoint(x: touch.midX, y: touch.maxY), labelPoint: NSPoint(x: touch.midX, y: touch.maxY + 8), align: .center)
-        addSwipe(.left, rect: NSRect(x: touch.minX, y: touch.midY - 45, width: 50, height: 90), anchor: NSPoint(x: touch.minX, y: touch.midY), labelPoint: NSPoint(x: remote.minX - 18, y: touch.midY - 8), align: .right)
-        addSwipe(.right, rect: NSRect(x: touch.maxX - 50, y: touch.midY - 45, width: 50, height: 90), anchor: NSPoint(x: touch.maxX, y: touch.midY), labelPoint: NSPoint(x: remote.maxX + 18, y: touch.midY - 8), align: .left)
+        addRingClick("dpadUp",    at: NSPoint(x: touch.midX, y: touch.minY + 25), arrow: "▲",
+                     anchor: NSPoint(x: touch.midX, y: touch.minY), labelPoint: NSPoint(x: touch.midX, y: 8), align: .center)
+        addRingClick("dpadDown",  at: NSPoint(x: touch.midX, y: touch.maxY - 25), arrow: "▼",
+                     anchor: NSPoint(x: touch.midX, y: touch.maxY), labelPoint: NSPoint(x: touch.midX, y: touch.maxY + 8), align: .center)
+        addRingClick("dpadLeft",  at: NSPoint(x: touch.minX + 25, y: touch.midY), arrow: "◀",
+                     anchor: NSPoint(x: touch.minX, y: touch.midY), labelPoint: NSPoint(x: remote.minX - 18, y: touch.midY - 8), align: .right)
+        addRingClick("dpadRight", at: NSPoint(x: touch.maxX - 25, y: touch.midY), arrow: "▶",
+                     anchor: NSPoint(x: touch.maxX, y: touch.midY), labelPoint: NSPoint(x: remote.maxX + 18, y: touch.midY - 8), align: .left)
         let lx = remote.minX + 62, rx = remote.maxX - 62
         addButton("menu", center: NSPoint(x: lx, y: remote.minY + 292), symbol: "MENU", labelPoint: NSPoint(x: remote.minX - 20, y: remote.minY + 281), align: .right)
         addButton("tv", center: NSPoint(x: rx, y: remote.minY + 292), symbol: "▣", labelPoint: NSPoint(x: remote.maxX + 20, y: remote.minY + 281), align: .left)
@@ -762,11 +763,26 @@ final class RemoteCanvasView: NSView {
         drawText("\(Self.buttonName("volumeDown"))\n\(mappingLabel(button: "volumeDown"))", at: downPoint, width: 170, align: .left, color: .labelColor, size: 13)
     }
 
-    private func addSwipe(_ direction: SwipeDirection, rect: NSRect, anchor: NSPoint, labelPoint: NSPoint, align: NSTextAlignment) {
-        hitAreas.append((rect, .swipe(direction)))
-        let selected = selection == .swipe(direction)
+    /// A quadrant of the clickpad ring — the physical direction-click button. The ring zone
+    /// itself and an outside label (with leader line) both select it; the outside label shows
+    /// the localized name plus the current mapping like every other button.
+    private func addRingClick(_ key: String, at center: NSPoint, arrow: String,
+                              anchor: NSPoint, labelPoint: NSPoint, align: NSTextAlignment) {
+        let rect = NSRect(x: center.x - 30, y: center.y - 17, width: 60, height: 34)
+        hitAreas.append((rect, .button(key)))
+        let w: CGFloat = 190
+        let hitX = align == .right ? labelPoint.x - w : align == .center ? labelPoint.x - w / 2 : labelPoint.x
+        hitAreas.append((NSRect(x: hitX, y: labelPoint.y - 6, width: w, height: 34), .button(key)))
+
+        let selected = selection == .button(key)
+        if selected {
+            NSColor.systemBlue.withAlphaComponent(0.85).setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: 6, dy: 2), xRadius: 8, yRadius: 8).fill()
+        }
+        drawText(arrow, at: NSPoint(x: center.x, y: center.y - 8), width: 56, align: .center,
+                 color: selected ? .white : NSColor.white.withAlphaComponent(0.75), size: 13)
         drawLeader(from: anchor, to: labelPoint, selected: selected)
-        drawText("\(Self.swipeName(direction))  \(mappingLabel(swipe: direction))", at: labelPoint, width: 190, align: align, color: .labelColor, size: 13)
+        drawText("\(Self.buttonName(key))  \(mappingLabel(button: key))", at: labelPoint, width: 190, align: align, color: .labelColor, size: 13)
     }
 
     private func drawLeader(from: NSPoint, to: NSPoint, selected: Bool) {
@@ -787,16 +803,8 @@ final class RemoteCanvasView: NSView {
         guard let m = manager else { return "" }
         return m.displayTitle(for: m.getMapping(for: key), target: .button(key))
     }
-    private func mappingLabel(swipe direction: SwipeDirection) -> String {
-        guard let m = manager else { return "" }
-        return m.displayTitle(for: m.getSwipeMapping(for: direction), target: .swipe(direction))
-    }
-
     static func buttonName(_ key: String) -> String {
-        ["select", "menu", "tv", "siri", "playPause", "volumeUp", "volumeDown", "mute", "power"].contains(key) ? tr("button.\(key)") : key
-    }
-
-    static func swipeName(_ direction: SwipeDirection) -> String {
-        switch direction { case .up: return tr("swipe.up"); case .down: return tr("swipe.down"); case .left: return tr("swipe.left"); case .right: return tr("swipe.right") }
+        ["select", "menu", "tv", "siri", "playPause", "volumeUp", "volumeDown", "mute", "power",
+         "dpadUp", "dpadDown", "dpadLeft", "dpadRight"].contains(key) ? tr("button.\(key)") : key
     }
 }
