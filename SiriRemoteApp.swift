@@ -54,6 +54,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             cursorController: cursorController,
             menuBarManager: menuBarManager
         )
+        remoteInputHandler?.onControlModeChanged = { [weak self] mode in
+            self?.menuBarManager?.updateControlMode(mode)
+            self?.touchHandler?.cancelCurrentGesture()
+        }
+        if let mode = remoteInputHandler?.controlMode {
+            menuBarManager.updateControlMode(mode)
+        }
         // Cursor-nudge actions (方向环默认) run through the same controller as the trackpad.
         menuBarManager.cursorController = cursorController
         
@@ -68,6 +75,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Tap-to-click respects the panel toggle, read live on each tap.
         touchHandler?.isTapEnabled = { [weak menuBarManager] in
             menuBarManager?.tapToClickEnabled ?? true
+        }
+        // Button mode blocks all direct trackpad gestures while keeping the device attached
+        // so switching back to trackpad mode is immediate.
+        touchHandler?.isPointerInputEnabled = { [weak self] in
+            self?.remoteInputHandler?.controlMode == .trackpad
         }
         touchHandler?.start()
         remoteInputHandler?.onButtonActivity = { [weak self] in

@@ -11,6 +11,13 @@ import Foundation
 import Carbon.HIToolbox
 import AppKit
 
+/// The center click has two fixed, purpose-built meanings. This sits outside
+/// configurable button mappings so the power key can switch it reliably.
+enum RemoteControlMode: String {
+    case trackpad
+    case buttons
+}
+
 class RemoteInputHandler {
     private let cursorController: CursorController
     private weak var menuBarManager: MenuBarManager?
@@ -34,6 +41,9 @@ class RemoteInputHandler {
     
     // Click/drag state
     private var isSelectPressed = false
+    private var selectHoldWork: DispatchWorkItem?
+    private var selectBecameDrag = false
+    private let selectDragHoldInterval: TimeInterval = 0.25
     
     // Prevent double-processing with MediaKeyInterceptor
     static var lastProcessedButton: String?
@@ -45,13 +55,25 @@ class RemoteInputHandler {
     private var buttonState: [String: Bool] = [:]
     private var pendingSingleClicks: [String: DispatchWorkItem] = [:]
     private let doubleClickInterval: TimeInterval = 0.32
+
+    private(set) var controlMode: RemoteControlMode
+    private var powerPressStartedAt: Date?
+    private let powerShortPressLimit: TimeInterval = 0.65
+    var onControlModeChanged: ((RemoteControlMode) -> Void)?
+
+    // Return/Menu remains a normal short-press mapping, but holding it quits the frontmost app.
+    private var backLongPressWork: DispatchWorkItem?
+    private var backLongPressTriggered = false
+    private let backLongPressInterval: TimeInterval = 1
     
     init(cursorController: CursorController, menuBarManager: MenuBarManager) {
         self.cursorController = cursorController
         self.menuBarManager = menuBarManager
+        controlMode = RemoteControlMode(rawValue: UserDefaults.standard.string(forKey: "remoteControlMode") ?? "") ?? .trackpad
     }
 
     deinit {
+        cancelBackLongPress()
         releaseSelectIfNeeded(reason: "handler deinit")
     }
     
@@ -66,6 +88,7 @@ class RemoteInputHandler {
                 self.seizeTimerActive = false
             }
             releaseSelectIfNeeded(reason: "device removed")
+            cancelBackLongPress()
             buttonState.removeAll()
             // A single click parked awaiting double-click resolution must not fire after
             // the remote is gone.
@@ -153,12 +176,17 @@ class RemoteInputHandler {
     }
 
     private func releaseSelectIfNeeded(reason: String) {
+        selectHoldWork?.cancel()
+        selectHoldWork = nil
         guard isSelectPressed else { return }
-        rmDebug("🖱 Select release fallback (\(reason))")
+        rmDebug("🖱 Select cancel fallback (\(reason))")
         isSelectPressed = false
         cursorController.isDragging = false
         cursorController.isClickActive = false
-        cursorController.mouseUp()
+        if selectBecameDrag {
+            cursorController.mouseUp()
+        }
+        selectBecameDrag = false
     }
     
     func handleInputValue(_ value: IOHIDValue) {
@@ -188,9 +216,23 @@ class RemoteInputHandler {
             VolumeRevertGuard.shared.armFromRemoteButton()
         }
 
+        // Power is reserved for the fixed mode switch and never runs a user mapping.
+        // Handle it before the first-press guard so a deliberate first short press still works.
+        if buttonName == "power" {
+            handlePowerButton(pressed: isPressed)
+            return
+        }
+
         // First key-down after connection: skip so the connect handshake doesn't fire an action.
         if intValue == 1 && isFirstPressAfterConnection {
             isFirstPressAfterConnection = false
+            return
+        }
+
+        // Return/Menu needs press duration, so its normal short action fires on release. This
+        // branch sits after the first-press guard by design.
+        if buttonName == "menu" || buttonName == "back" {
+            handleBackButton(button: buttonName, pressed: isPressed)
             return
         }
 
@@ -216,22 +258,110 @@ class RemoteInputHandler {
     }
     
     private func handleSelectButton(pressed: Bool) {
+        if controlMode == .buttons {
+            if pressed {
+                rmDebug("⌨️ Select pressed in button mode → Enter")
+                menuBarManager?.execute(.enter, storageKey: "mode-select")
+            }
+            return
+        }
+
         if pressed && !isSelectPressed {
             isSelectPressed = true
             cursorController.isClickActive = true
-            cursorController.isDragging = true
-            rmDebug("🖱 Select pressed → mouseDown")
-            cursorController.mouseDown()
+            selectBecameDrag = false
+            selectHoldWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.isSelectPressed, self.controlMode == .trackpad else { return }
+                self.selectBecameDrag = true
+                self.cursorController.isDragging = true
+                self.cursorController.mouseDown()
+                rmDebug("🖱 Select held → begin drag")
+            }
+            selectHoldWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + selectDragHoldInterval,
+                                          execute: work)
+            rmDebug("🖱 Select pressed → waiting for click/drag decision")
         } else if !pressed && isSelectPressed {
+            selectHoldWork?.cancel()
+            selectHoldWork = nil
             isSelectPressed = false
             cursorController.isDragging = false
-            rmDebug("🖱 Select released → mouseUp")
-            cursorController.mouseUp()
+            if selectBecameDrag {
+                rmDebug("🖱 Select released → end drag")
+                cursorController.mouseUp()
+            } else {
+                rmDebug("🖱 Select short press → clean click")
+                cursorController.performClick()
+            }
+            selectBecameDrag = false
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.cursorController.isClickActive = false
             }
         }
+    }
+
+    private func handlePowerButton(pressed: Bool) {
+        if pressed {
+            isFirstPressAfterConnection = false
+            powerPressStartedAt = Date()
+            return
+        }
+
+        guard let startedAt = powerPressStartedAt else { return }
+        powerPressStartedAt = nil
+        let duration = Date().timeIntervalSince(startedAt)
+        guard duration <= powerShortPressLimit else {
+            rmDebug(String(format: "⏻ Power held for %.2fs — mode unchanged", duration))
+            return
+        }
+
+        controlMode = controlMode == .trackpad ? .buttons : .trackpad
+        if controlMode == .buttons {
+            releaseSelectIfNeeded(reason: "switched to button mode")
+        }
+        UserDefaults.standard.set(controlMode.rawValue, forKey: "remoteControlMode")
+        rmDebug("⏻ Power short press → \(controlMode.rawValue) mode")
+        onControlModeChanged?(controlMode)
+    }
+
+    private func handleBackButton(button: String, pressed: Bool) {
+        if pressed {
+            cancelBackLongPress()
+            backLongPressTriggered = false
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.backLongPressTriggered = true
+                self.menuBarManager?.beginQuitFrontmostApplicationHold()
+                rmDebug("↩︎ Return held → Cmd+Q keyDown")
+            }
+            backLongPressWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + backLongPressInterval,
+                                          execute: work)
+            return
+        }
+
+        backLongPressWork?.cancel()
+        backLongPressWork = nil
+        guard !backLongPressTriggered else {
+            menuBarManager?.endQuitFrontmostApplicationHold()
+            rmDebug("↩︎ Return released → Cmd+Q keyUp")
+            backLongPressTriggered = false
+            return
+        }
+
+        let action = menuBarManager?.getMapping(for: button) ?? .none
+        executeAction(action, button: button, pressed: true)
+    }
+
+    private func cancelBackLongPress() {
+        backLongPressWork?.cancel()
+        backLongPressWork = nil
+        if backLongPressTriggered {
+            menuBarManager?.endQuitFrontmostApplicationHold()
+        }
+        backLongPressTriggered = false
     }
 
     // MARK: - Button Identification

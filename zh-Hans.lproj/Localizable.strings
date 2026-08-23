@@ -5,6 +5,8 @@
 "menu.quit" = "退出 Wand";
 "status.connected" = "状态：已连接 ✓";
 "status.disconnected" = "状态：未连接";
+"mode.trackpad" = "模式：触摸板（确认键 = 鼠标左键）";
+"mode.buttons" = "模式：按键（确认键 = Enter）";
 
 /* 配对指引窗口 */
 "pairing.windowTitle" = "配对指引";

@@ -5,6 +5,8 @@
 "menu.quit" = "Quit Wand";
 "status.connected" = "Status: Connected ✓";
 "status.disconnected" = "Status: Disconnected";
+"mode.trackpad" = "Mode: Trackpad (center click = left mouse click)";
+"mode.buttons" = "Mode: Buttons (center click = Enter)";
 
 /* Pairing guide window */
 "pairing.windowTitle" = "Pairing Guide";

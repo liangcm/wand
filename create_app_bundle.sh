@@ -86,12 +86,21 @@ chmod +x "${APP_BUNDLE}/Contents/MacOS/$APP_NAME"
 
 # Sign with hardened runtime + entitlements. Required on modern macOS (14+) for
 # IOHIDManager to deliver Bluetooth HID devices like the Siri Remote to the app.
-# Ad-hoc (`--sign -`) is used; for distribution, swap in a Developer ID identity.
+# A stable signing identity also keeps Wand's designated requirement unchanged between
+# local rebuilds, so macOS can retain Accessibility permission across app updates.
 if [ -f "Wand.entitlements" ]; then
     echo "Signing with hardened runtime + entitlements..."
+
+    # Override with WAND_CODESIGN_IDENTITY when needed. This Mac's development certificate
+    # is the stable default; fall back to ad-hoc on machines where it is unavailable.
+    SIGN_IDENTITY="${WAND_CODESIGN_IDENTITY:-F9B508DF6EACAB3F331C3823408358F490385A58}"
+    if ! security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
+        echo "Stable signing identity unavailable; using ad-hoc signature"
+        SIGN_IDENTITY="-"
+    fi
     codesign --force --options=runtime \
         --entitlements "Wand.entitlements" \
-        --sign - \
+        --sign "$SIGN_IDENTITY" \
         "${APP_BUNDLE}"
     codesign -dvv "${APP_BUNDLE}" 2>&1 | grep -E "(flags|Identifier)" || true
 else

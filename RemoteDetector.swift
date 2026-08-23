@@ -55,7 +55,7 @@ class RemoteDetector {
     // Known Siri Remote / Apple TV Remote product IDs
     private let knownProductIDs: [Int] = [
         0x0221, 0x0255, 0x0266, 0x0267, 0x0269,
-        0x026D, 0x0314, 0x0C4E, 0x0C4F, 0x030D, 0x030E
+        0x026D, 0x0314, 0x0315, 0x0C4E, 0x0C4F, 0x030D, 0x030E
     ]
     
     init(deviceCallback: @escaping (IOHIDDevice?) -> Void) {

@@ -73,6 +73,9 @@ class TouchHandler {
     var onPinch: (() -> Void)?
     /// Returns whether tap-to-click is currently enabled; nil defaults to enabled.
     var isTapEnabled: (() -> Bool)?
+    /// Returns whether direct trackpad input may control the Mac. Button mode keeps the
+    /// device attached for fast switching, but must not move, scroll, tap, or pinch.
+    var isPointerInputEnabled: (() -> Bool)?
     private let reconnectInterval: TimeInterval = 2.0
     private let idleTimeout: TimeInterval = 90.0
     private let touchStarvationThreshold: TimeInterval = 15.0
@@ -230,6 +233,11 @@ class TouchHandler {
     func handleTouches(touches: UnsafeMutablePointer<MTTouch>?, count: Int, timestamp: Double) {
         lastTouchTime = mach_absolute_time()
 
+        guard isPointerInputEnabled?() ?? true else {
+            cancelPointerGesture()
+            return
+        }
+
         guard count > 0, let touchPtr = touches else {
             // Touch ended
             handleTouchEnd()
@@ -326,7 +334,7 @@ class TouchHandler {
                 lastTouchPosition = currentPos
             }
         } else if activeTouchCount == 2 && lastTouchCount == 2 {
-            // Two fingers: always scroll regardless of mode
+            // Two fingers scroll in trackpad mode (button mode returned above).
             performScroll(deltaX: deltaX, deltaY: deltaY)
             lastTouchPosition = currentPos
         } else {
@@ -363,7 +371,23 @@ class TouchHandler {
             }
         }
     }
-    
+
+    /// Drops all gesture state without generating an input event. Called both while button
+    /// mode is active and immediately when switching into it.
+    func cancelCurrentGesture() {
+        cancelPointerGesture()
+    }
+
+    private func cancelPointerGesture() {
+        lastTouchPosition = nil
+        lastTouchCount = 0
+        touchStartTime = 0
+        touchStartPosition = .zero
+        hadMultipleFingersInSession = false
+        pinchPeakSpread = 0
+        pinchFired = false
+    }
+
     private func moveCursor(deltaX: CGFloat, deltaY: CGFloat) -> (clampedX: Bool, clampedY: Bool) {
         let scaledX = deltaX * cursorScale
         let scaledY = -deltaY * cursorScale

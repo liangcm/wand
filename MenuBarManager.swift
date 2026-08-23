@@ -40,7 +40,9 @@ enum RemoteAction: String, CaseIterable {
     // 第 2 类 · F 键
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
     // 第 3 类 · 组合键（learnedShortcut = 自定义组合，兜底）
-    case cmdC, cmdV, cmdX, cmdZ, cmdShiftZ, cmdA, cmdS, cmdW, cmdF, ctrlC, shiftTab
+    case cmdC, cmdV, cmdX, cmdZ, cmdShiftZ, cmdA, cmdS, cmdW, cmdF
+    case ctrlB, ctrlC, ctrlD, ctrlR, ctrlY, ctrlGrave
+    case shiftTab, shiftComma, shiftPeriod
     case cmdF1, cmdF2, cmdF3, cmdF4, cmdF5, cmdF6, cmdF7, cmdF8, cmdF9, cmdF10, cmdF11, cmdF12
     case learnedShortcut
     // 特殊功能
@@ -57,7 +59,9 @@ enum RemoteAction: String, CaseIterable {
             return .functionKey
         case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
             return .fKey
-        case .cmdC, .cmdV, .cmdX, .cmdZ, .cmdShiftZ, .cmdA, .cmdS, .cmdW, .cmdF, .ctrlC, .shiftTab, .learnedShortcut,
+        case .cmdC, .cmdV, .cmdX, .cmdZ, .cmdShiftZ, .cmdA, .cmdS, .cmdW, .cmdF,
+             .ctrlB, .ctrlC, .ctrlD, .ctrlR, .ctrlY, .ctrlGrave,
+             .shiftTab, .shiftComma, .shiftPeriod, .learnedShortcut,
              .cmdF1, .cmdF2, .cmdF3, .cmdF4, .cmdF5, .cmdF6, .cmdF7, .cmdF8, .cmdF9, .cmdF10, .cmdF11, .cmdF12:
             return .combo
         case .customText, .openApp, .none:
@@ -106,8 +110,15 @@ enum RemoteAction: String, CaseIterable {
         case .cmdS: return "Cmd+S"
         case .cmdW: return "Cmd+W"
         case .cmdF: return "Cmd+F"
+        case .ctrlB: return "Ctrl+B"
         case .ctrlC: return "Ctrl+C"
+        case .ctrlD: return "Ctrl+D"
+        case .ctrlR: return "Ctrl+R"
+        case .ctrlY: return "Ctrl+Y"
+        case .ctrlGrave: return "Ctrl+·"
         case .shiftTab: return "Shift+Tab"
+        case .shiftComma: return "Shift+，"
+        case .shiftPeriod: return "Shift+。"
         case .cmdF1: return "Cmd+F1"
         case .cmdF2: return "Cmd+F2"
         case .cmdF3: return "Cmd+F3"
@@ -255,6 +266,7 @@ class MenuBarManager {
     private let statusItem: NSStatusItem
     private let menu: NSMenu
     private let statusMenuItem: NSMenuItem
+    private let modeMenuItem: NSMenuItem
     private var remotePanelController: RemotePanelController?
     private var pairingGuideController: PairingGuideController?
     private(set) var isConnected = false
@@ -296,11 +308,13 @@ class MenuBarManager {
         self.statusItem = statusItem
         self.menu = NSMenu()
         self.statusMenuItem = NSMenuItem(title: tr("status.disconnected"), action: nil, keyEquivalent: "")
+        self.modeMenuItem = NSMenuItem(title: tr("mode.trackpad"), action: nil, keyEquivalent: "")
 
         migrateFromLegacyDomain()
         loadMappings()
         loadLearnedShortcuts()
         loadDoubleClickMappings()
+        applyTVMuteShortcutMigration()
         loadTextActions()
         loadAppActions()
         // Swipe-to-action was removed (gliding is purely cursor movement now) — drop the
@@ -344,13 +358,14 @@ class MenuBarManager {
         let defaultMappings: [String: RemoteAction] = [
             "playPause": .enter,
             "menu": .esc,
+            "back": .esc,
             "select": .leftClick,
             "volumeUp": .up,
             "volumeDown": .down,
             "siri": .space,
-            "tv": .ctrlC,
+            "tv": .ctrlD,
             "power": .none,
-            "mute": .none,
+            "mute": .ctrlY,
             // 方向环点击默认平移光标；在面板里可改绑任意动作
             "dpadUp": .cursorUp,
             "dpadDown": .cursorDown,
@@ -368,9 +383,7 @@ class MenuBarManager {
             for (button, action) in defaultMappings where buttonMappings[button] == nil {
                 buttonMappings[button] = action
             }
-            // "select" is hard-wired to click/drag in the HID handler and locked in the panel;
-            // any other persisted value (e.g. a pre-reorg default that was never effective)
-            // is dead data — normalize so storage matches actual behavior.
+            // Select runs a fixed stateful workflow in the HID handler.
             buttonMappings["select"] = .leftClick
             saveMappings()   // persist the migrated rawValues in the new form
         } else {
@@ -399,13 +412,40 @@ class MenuBarManager {
     }
 
     private func loadDoubleClickMappings() {
-        guard let saved = UserDefaults.standard.dictionary(forKey: "doubleClickMappings") as? [String: String] else { return }
-        for (button, raw) in saved { if let action = RemoteAction.parse(raw) { doubleClickMappings[button] = action } }
+        if let saved = UserDefaults.standard.dictionary(forKey: "doubleClickMappings") as? [String: String] {
+            for (button, raw) in saved { if let action = RemoteAction.parse(raw) { doubleClickMappings[button] = action } }
+        }
+        if doubleClickMappings["playPause"] == nil {
+            doubleClickMappings["playPause"] = .ctrlD
+        }
+        if doubleClickMappings["dpadUp"] == nil {
+            doubleClickMappings["dpadUp"] = .ctrlGrave
+        }
+        if doubleClickMappings["dpadLeft"] == nil {
+            doubleClickMappings["dpadLeft"] = .shiftComma
+        }
+        if doubleClickMappings["dpadRight"] == nil {
+            doubleClickMappings["dpadRight"] = .shiftPeriod
+        }
         saveDoubleClickMappings()   // converge migrated rawValues to the new form
     }
 
     private func saveDoubleClickMappings() {
         UserDefaults.standard.set(doubleClickMappings.mapValues(\.rawValue), forKey: "doubleClickMappings")
+    }
+
+    /// Apply the requested TV/Mute shortcuts once to existing installations, then leave them
+    /// editable in the mapping panel on subsequent launches.
+    private func applyTVMuteShortcutMigration() {
+        let key = "tvMuteShortcutsV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        buttonMappings["tv"] = .ctrlD
+        buttonMappings["mute"] = .ctrlY
+        doubleClickMappings["tv"] = .ctrlB
+        doubleClickMappings["mute"] = .ctrlR
+        saveMappings()
+        saveDoubleClickMappings()
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     private func loadTextActions() {
@@ -481,6 +521,9 @@ class MenuBarManager {
         // Status
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
+
+        modeMenuItem.isEnabled = false
+        menu.addItem(modeMenuItem)
         
         menu.addItem(NSMenuItem.separator())
 
@@ -531,6 +574,12 @@ class MenuBarManager {
             self.statusMenuItem.title = connected ? tr("status.connected") : tr("status.disconnected")
             self.statusItem.button?.appearsDisabled = !connected
             self.remotePanelController?.updateConnectionStatus(connected)
+        }
+    }
+
+    func updateControlMode(_ mode: RemoteControlMode) {
+        DispatchQueue.main.async { [weak self] in
+            self?.modeMenuItem.title = mode == .trackpad ? tr("mode.trackpad") : tr("mode.buttons")
         }
     }
 
@@ -614,15 +663,18 @@ class MenuBarManager {
 
     func resetMappingsToDefaults() {
         buttonMappings = [
-            "playPause": .enter, "menu": .esc, "select": .leftClick,
+            "playPause": .enter, "menu": .esc, "back": .esc, "select": .leftClick,
             "volumeUp": .up, "volumeDown": .down, "siri": .space,
-            "tv": .ctrlC, "power": .none, "mute": .none,
+            "tv": .ctrlD, "power": .none, "mute": .ctrlY,
             "dpadUp": .cursorUp, "dpadDown": .cursorDown,
             "dpadLeft": .cursorLeft, "dpadRight": .cursorRight
         ]
         // Also clear double-click bindings and every side table, or stale learned shortcuts /
         // text / app bindings would survive a "reset to defaults".
-        doubleClickMappings = [:]
+        doubleClickMappings = [
+            "playPause": .ctrlD, "tv": .ctrlB, "mute": .ctrlR,
+            "dpadUp": .ctrlGrave, "dpadLeft": .shiftComma, "dpadRight": .shiftPeriod
+        ]
         learnedShortcuts = [:]
         textActions = [:]
         appActions = [:]
@@ -684,6 +736,34 @@ class MenuBarManager {
         }
     }
 
+    // MARK: - Held Keyboard Actions
+
+    func beginQuitFrontmostApplicationHold() {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let commandDown = CGEvent(keyboardEventSource: src,
+                                  virtualKey: CGKeyCode(kVK_Command), keyDown: true)
+        commandDown?.flags = .maskCommand
+        commandDown?.post(tap: .cghidEventTap)
+        usleep(5000)
+        let qDown = CGEvent(keyboardEventSource: src,
+                            virtualKey: CGKeyCode(kVK_ANSI_Q), keyDown: true)
+        qDown?.flags = .maskCommand
+        qDown?.post(tap: .cghidEventTap)
+    }
+
+    func endQuitFrontmostApplicationHold() {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let qUp = CGEvent(keyboardEventSource: src,
+                          virtualKey: CGKeyCode(kVK_ANSI_Q), keyDown: false)
+        qUp?.flags = .maskCommand
+        qUp?.post(tap: .cghidEventTap)
+        usleep(5000)
+        let commandUp = CGEvent(keyboardEventSource: src,
+                                virtualKey: CGKeyCode(kVK_Command), keyDown: false)
+        commandUp?.flags = []
+        commandUp?.post(tap: .cghidEventTap)
+    }
+
     /// Execute a mapped action. `storageKey` resolves the data-backed actions — it's
     /// `MappingTarget.storageKey`, which the HID path already passes as its button name.
     /// Everything fires as a single tap; there is no press-and-hold anymore.
@@ -733,8 +813,15 @@ class MenuBarManager {
         case .cmdS:      sendKey(kVK_ANSI_S, flags: .maskCommand)
         case .cmdW:      sendKey(kVK_ANSI_W, flags: .maskCommand)
         case .cmdF:      sendKey(kVK_ANSI_F, flags: .maskCommand)
+        case .ctrlB:     sendKey(kVK_ANSI_B, flags: .maskControl)
         case .ctrlC:     sendKey(kVK_ANSI_C, flags: .maskControl)
+        case .ctrlD:     sendKey(kVK_ANSI_D, flags: .maskControl)
+        case .ctrlR:     sendKey(kVK_ANSI_R, flags: .maskControl)
+        case .ctrlY:     sendKey(kVK_ANSI_Y, flags: .maskControl)
+        case .ctrlGrave: sendKey(kVK_ANSI_Grave, flags: .maskControl)
         case .shiftTab:  sendKey(kVK_Tab, flags: .maskShift)
+        case .shiftComma: sendKey(kVK_ANSI_Comma, flags: .maskShift)
+        case .shiftPeriod: sendKey(kVK_ANSI_Period, flags: .maskShift)
         // Cmd+F1..F12（F 键 keyCode 乱序，取自 Carbon HIToolbox；纯 F 键走 .f1..f12）
         case .cmdF1: sendKey(122, flags: .maskCommand)
         case .cmdF2: sendKey(120, flags: .maskCommand)

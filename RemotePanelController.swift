@@ -367,16 +367,17 @@ final class RemotePanelController: NSWindowController, NSWindowDelegate {
         selection = newSelection
         guard let manager else { return }
 
-        // Trackpad center click is hard-wired to mouse click / drag in the HID handler, so its
-        // mapping isn't configurable — lock the inspector controls when it's selected.
+        // Trackpad centre click uses a fixed stateful workflow in the HID handler.
         let locked = (newSelection == .button("select"))
 
         switch newSelection {
         case .button(let key):
             selectionLabel.stringValue = "   \(RemoteCanvasView.buttonName(key))"
-            helpLabel.stringValue = locked
-                ? tr("panel.help.selectLocked")
-                : tr("panel.help.button")
+            if key == "select" {
+                helpLabel.stringValue = tr("panel.help.selectLocked")
+            } else {
+                helpLabel.stringValue = tr("panel.help.button")
+            }
             // Coming from another key, start on 单击 — otherwise the segment silently carries
             // over and edits land on the new key's DOUBLE-click target. Not reset when the
             // selection is unchanged (clickModeChanged() re-enters here to refresh the menu).
