@@ -65,6 +65,10 @@ class RemoteInputHandler {
     private var buttonState: [String: Bool] = [:]
     private var pendingSingleClicks: [String: DispatchWorkItem] = [:]
     private let doubleClickInterval: TimeInterval = 0.32
+    private var tvPressActive = false
+    private var tvLongPressTriggered = false
+    private var tvLongPressWork: DispatchWorkItem?
+    private let tvLongPressInterval: TimeInterval = 2
 
     private(set) var controlMode: RemoteControlMode
     private var isMacTVFrontmost = false
@@ -114,6 +118,7 @@ class RemoteInputHandler {
 
     deinit {
         powerSleepWork?.cancel()
+        cancelTVLongPress()
         cancelMuteLongPress()
         cancelBackLongPress()
         releaseSelectIfNeeded(reason: "handler deinit")
@@ -137,6 +142,8 @@ class RemoteInputHandler {
             powerSleepWork?.cancel()
             powerSleepWork = nil
             powerPressActive = false
+            cancelTVLongPress()
+            tvPressActive = false
             cancelMuteLongPress()
             cancelBackLongPress()
             buttonState.removeAll()
@@ -280,6 +287,11 @@ class RemoteInputHandler {
             return
         }
 
+        if buttonName == "tv" {
+            handleTVButton(pressed: isPressed)
+            return
+        }
+
         // First key-down after connection: skip so the connect handshake doesn't fire an action.
         if intValue == 1 && isFirstPressAfterConnection {
             isFirstPressAfterConnection = false
@@ -406,6 +418,41 @@ class RemoteInputHandler {
         // subsequent release then opens macOS's shutdown panel. Wait until both HID and NX
         // release events have drained before asking the system to sleep.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    private func handleTVButton(pressed: Bool) {
+        if pressed {
+            guard !tvPressActive else { return }
+            tvPressActive = true
+            tvLongPressTriggered = false
+            tvLongPressWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.tvPressActive else { return }
+                self.tvLongPressTriggered = true
+                self.pendingSingleClicks.removeValue(forKey: "tv")?.cancel()
+                self.menuBarManager?.execute(.ctrlGrave, storageKey: "long:tv")
+                rmDebug("📺 TV held for 2.00s — Ctrl+·")
+            }
+            tvLongPressWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + tvLongPressInterval, execute: work)
+            return
+        }
+
+        guard tvPressActive else { return }
+        tvPressActive = false
+        tvLongPressWork?.cancel()
+        tvLongPressWork = nil
+        if tvLongPressTriggered {
+            tvLongPressTriggered = false
+            return
+        }
+        executeAction(resolvedAction(for: "tv"), button: "tv", pressed: true)
+    }
+
+    private func cancelTVLongPress() {
+        tvLongPressWork?.cancel()
+        tvLongPressWork = nil
+        tvLongPressTriggered = false
     }
 
     private func rmRequestSystemSleepAfterPowerRelease() {

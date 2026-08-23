@@ -332,6 +332,7 @@ class MenuBarManager {
         applyNativeMediaButtonMigration()
         applyMacTVRemoteShortcutMigrationV2()
         applyMuteDoubleEnterMigration()
+        removeVolumeUpDoubleShortcutMigration()
         loadTextActions()
         loadAppActions()
         // Swipe-to-action was removed (gliding is purely cursor movement now) — drop the
@@ -503,6 +504,14 @@ class MenuBarManager {
         let key = "muteDoubleEnterV1"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         doubleClickMappings["mute"] = .enter
+        saveDoubleClickMappings()
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
+    private func removeVolumeUpDoubleShortcutMigration() {
+        let key = "removeVolumeUpDoubleCtrlGraveV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        doubleClickMappings.removeValue(forKey: "volumeUp")
         saveDoubleClickMappings()
         UserDefaults.standard.set(true, forKey: key)
     }
