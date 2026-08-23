@@ -43,11 +43,21 @@ class RemoteInputHandler {
     private var isSelectPressed = false
     private var selectHoldWork: DispatchWorkItem?
     private var selectBecameDrag = false
+    private var isButtonModeSelectPressed = false
     private let selectDragHoldInterval: TimeInterval = 0.25
+    var onButtonModeSelectStateChanged: ((Bool) -> Void)?
     
     // Prevent double-processing with MediaKeyInterceptor
     static var lastProcessedButton: String?
     static var lastProcessedTime: UInt64 = 0
+    private static var lastFilmlyPlayPauseDispatchAt: TimeInterval = 0
+
+    static func claimFilmlyPlayPauseDispatch() -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastFilmlyPlayPauseDispatchAt > 0.08 else { return false }
+        lastFilmlyPlayPauseDispatchAt = now
+        return true
+    }
 
     /// Last observed pressed/released state per button. The Siri Remote mirrors each logical
     /// button across multiple HID interfaces (6 seized here), so every physical press/release
@@ -57,9 +67,18 @@ class RemoteInputHandler {
     private let doubleClickInterval: TimeInterval = 0.32
 
     private(set) var controlMode: RemoteControlMode
-    private var powerPressStartedAt: Date?
-    private let powerShortPressLimit: TimeInterval = 0.65
+    private var isMacTVFrontmost = false
+    private var powerPressActive = false
+    private var powerSleepWork: DispatchWorkItem?
+    private var muteLongPressWork: DispatchWorkItem?
+    private var muteLongPressTriggered = false
+    private var muteStateBeforePress: Bool?
+    private var muteSingleClickWork: DispatchWorkItem?
+    private var muteSecondPress = false
+    private var mutePressActive = false
+    private let muteLongPressInterval: TimeInterval = 1
     var onControlModeChanged: ((RemoteControlMode) -> Void)?
+    var onPowerButtonPressed: (() -> Void)?
 
     // Return/Menu remains a normal short-press mapping, but holding it quits the frontmost app.
     private var backLongPressWork: DispatchWorkItem?
@@ -72,7 +91,30 @@ class RemoteInputHandler {
         controlMode = RemoteControlMode(rawValue: UserDefaults.standard.string(forKey: "remoteControlMode") ?? "") ?? .trackpad
     }
 
+    /// Mac TV owns the remote mode while it is the frontmost app: its launcher uses button
+    /// navigation, while every other app receives Wand's pointer/trackpad behavior.
+    func setMacTVFrontmost(_ frontmost: Bool) {
+        isMacTVFrontmost = frontmost
+        applyControlMode(frontmost ? .buttons : .trackpad, reason: "Mac TV frontmost=\(frontmost)")
+    }
+
+    private func applyControlMode(_ mode: RemoteControlMode, reason: String) {
+        guard controlMode != mode else {
+            rmDebug("🎛 \(reason) — already in \(mode.rawValue) mode")
+            return
+        }
+        controlMode = mode
+        if mode == .buttons {
+            releaseSelectIfNeeded(reason: "switched to button mode")
+        }
+        UserDefaults.standard.set(mode.rawValue, forKey: "remoteControlMode")
+        rmDebug("🎛 \(reason) → \(mode.rawValue) mode")
+        onControlModeChanged?(mode)
+    }
+
     deinit {
+        powerSleepWork?.cancel()
+        cancelMuteLongPress()
         cancelBackLongPress()
         releaseSelectIfNeeded(reason: "handler deinit")
     }
@@ -88,6 +130,14 @@ class RemoteInputHandler {
                 self.seizeTimerActive = false
             }
             releaseSelectIfNeeded(reason: "device removed")
+            if isButtonModeSelectPressed {
+                isButtonModeSelectPressed = false
+                onButtonModeSelectStateChanged?(false)
+            }
+            powerSleepWork?.cancel()
+            powerSleepWork = nil
+            powerPressActive = false
+            cancelMuteLongPress()
             cancelBackLongPress()
             buttonState.removeAll()
             // A single click parked awaiting double-click resolution must not fire after
@@ -212,7 +262,9 @@ class RemoteInputHandler {
         // Volume keys on the Siri Remote also travel over BT AVRCP absolute-volume, which
         // coreaudiod honors below cghidEventTap. Arm the revert guard on every press so the
         // CoreAudio listener snaps the level back to the pre-press value.
-        if isPressed && (buttonName == "volumeUp" || buttonName == "volumeDown") {
+        if isPressed && (buttonName == "volumeUp" || buttonName == "volumeDown"),
+           menuBarManager?.getMapping(for: buttonName) != .systemVolumeUp,
+           menuBarManager?.getMapping(for: buttonName) != .systemVolumeDown {
             VolumeRevertGuard.shared.armFromRemoteButton()
         }
 
@@ -220,6 +272,11 @@ class RemoteInputHandler {
         // Handle it before the first-press guard so a deliberate first short press still works.
         if buttonName == "power" {
             handlePowerButton(pressed: isPressed)
+            return
+        }
+
+        if buttonName == "mute" {
+            handleMuteButton(pressed: isPressed)
             return
         }
 
@@ -245,21 +302,46 @@ class RemoteInputHandler {
         let pressed = (intValue == 1)
 
         // Debounce only on press — actions fire on press, release does nothing.
-        if pressed {
+        let action = resolvedAction(for: buttonName)
+        if pressed, buttonName == "playPause", action == .space,
+           !Self.claimFilmlyPlayPauseDispatch() {
+            return
+        }
+        if pressed && !action.isNativeMediaAction {
             RemoteInputHandler.lastProcessedButton = buttonName
             RemoteInputHandler.lastProcessedTime = mach_absolute_time()
         }
-
-        let action = menuBarManager?.getMapping(for: buttonName) ?? RemoteAction.none
         if pressed {
             print("🔘 Button pressed: \(buttonName) → \(action.rawValue)")
         }
         executeAction(action, button: buttonName, pressed: pressed)
     }
+
+    private func resolvedAction(for buttonName: String) -> RemoteAction {
+        if buttonName == "playPause",
+           NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.netease.filmlymac" {
+            return .space
+        }
+        return menuBarManager?.getMapping(for: buttonName) ?? .none
+    }
     
     private func handleSelectButton(pressed: Bool) {
+        // The press can open another app immediately, which switches Wand to trackpad mode
+        // before this same physical button is released. Keep ownership of that release here
+        // so it cannot fall through as a click in the newly-frontmost app.
+        if isButtonModeSelectPressed {
+            if !pressed {
+                isButtonModeSelectPressed = false
+                onButtonModeSelectStateChanged?(false)
+                rmDebug("⌨️ Select released after button-mode activation → suppress pointer click")
+            }
+            return
+        }
+
         if controlMode == .buttons {
             if pressed {
+                isButtonModeSelectPressed = true
+                onButtonModeSelectStateChanged?(true)
                 rmDebug("⌨️ Select pressed in button mode → Enter")
                 menuBarManager?.execute(.enter, storageKey: "mode-select")
             }
@@ -304,26 +386,133 @@ class RemoteInputHandler {
 
     private func handlePowerButton(pressed: Bool) {
         if pressed {
+            guard !powerPressActive else { return }
+            powerPressActive = true
             isFirstPressAfterConnection = false
-            powerPressStartedAt = Date()
+            onPowerButtonPressed?()
+            rmDebug("⏻ Power pressed — waiting for release before sleep")
             return
         }
 
-        guard let startedAt = powerPressStartedAt else { return }
-        powerPressStartedAt = nil
-        let duration = Date().timeIntervalSince(startedAt)
-        guard duration <= powerShortPressLimit else {
-            rmDebug(String(format: "⏻ Power held for %.2fs — mode unchanged", duration))
+        guard powerPressActive else { return }
+        powerPressActive = false
+        onPowerButtonPressed?()
+        powerSleepWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.rmRequestSystemSleepAfterPowerRelease()
+        }
+        powerSleepWork = work
+        // Sleeping on key-down lets the still-held remote wake the Mac immediately; the
+        // subsequent release then opens macOS's shutdown panel. Wait until both HID and NX
+        // release events have drained before asking the system to sleep.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    private func rmRequestSystemSleepAfterPowerRelease() {
+        powerSleepWork = nil
+        rmDebug("⏻ Power released — requesting system sleep")
+        requestSystemSleep()
+    }
+
+    private func requestSystemSleep() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        process.arguments = ["sleepnow"]
+        do {
+            try process.run()
+        } catch {
+            rmDebug("⚠️ Unable to request system sleep: \(error.localizedDescription)")
+        }
+    }
+
+    private func handleMuteButton(pressed: Bool) {
+        if pressed {
+            mutePressActive = true
+            muteLongPressWork?.cancel()
+            muteLongPressTriggered = false
+            if let pendingSingle = muteSingleClickWork {
+                pendingSingle.cancel()
+                muteSingleClickWork = nil
+                muteSecondPress = true
+            } else {
+                muteSecondPress = false
+                muteStateBeforePress = SystemVolume.isMuted()
+            }
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.muteLongPressTriggered = true
+                self.restoreMuteStateBeforeGesture()
+                self.menuBarManager?.typeLiteral("jade")
+                rmDebug("🔇 Mute held for 1.00s — typed literal text: jade")
+            }
+            muteLongPressWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + muteLongPressInterval, execute: work)
             return
         }
 
-        controlMode = controlMode == .trackpad ? .buttons : .trackpad
-        if controlMode == .buttons {
-            releaseSelectIfNeeded(reason: "switched to button mode")
+        mutePressActive = false
+        muteLongPressWork?.cancel()
+        muteLongPressWork = nil
+        if muteLongPressTriggered {
+            muteLongPressTriggered = false
+            muteSecondPress = false
+            muteStateBeforePress = nil
+            return
         }
-        UserDefaults.standard.set(controlMode.rawValue, forKey: "remoteControlMode")
-        rmDebug("⏻ Power short press → \(controlMode.rawValue) mode")
-        onControlModeChanged?(controlMode)
+
+        if muteSecondPress {
+            muteSecondPress = false
+            restoreMuteStateBeforeGesture()
+            muteStateBeforePress = nil
+            let doubleAction = menuBarManager?.getDoubleClickMapping(for: "mute") ?? .enter
+            menuBarManager?.execute(doubleAction, storageKey: "double:mute")
+            rmDebug("🔇 Mute double press — Enter")
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.muteSingleClickWork = nil
+            self.performSingleMuteAction()
+            self.muteStateBeforePress = nil
+            rmDebug("🔇 Mute single press — native system mute")
+        }
+        muteSingleClickWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + doubleClickInterval, execute: work)
+    }
+
+    private func cancelMuteLongPress() {
+        muteLongPressWork?.cancel()
+        muteLongPressWork = nil
+        muteSingleClickWork?.cancel()
+        muteSingleClickWork = nil
+        muteLongPressTriggered = false
+        muteSecondPress = false
+        mutePressActive = false
+        muteStateBeforePress = nil
+    }
+
+    var shouldConsumeMuteMediaKey: Bool {
+        mutePressActive || muteSingleClickWork != nil || muteSecondPress || muteLongPressTriggered
+    }
+
+    private func restoreMuteStateBeforeGesture() {
+        if let originalMuteState = muteStateBeforePress {
+            SystemVolume.setMuted(originalMuteState)
+        }
+    }
+
+    private func performSingleMuteAction() {
+        guard let current = SystemVolume.isMuted() else { return }
+        if let originalMuteState = muteStateBeforePress {
+            // If a raw Bluetooth mute event slipped through before the HID press was observed,
+            // it already toggled the state. Otherwise apply the single toggle now.
+            if current == originalMuteState {
+                SystemVolume.setMuted(!originalMuteState)
+            }
+        } else {
+            SystemVolume.setMuted(!current)
+        }
     }
 
     private func handleBackButton(button: String, pressed: Bool) {

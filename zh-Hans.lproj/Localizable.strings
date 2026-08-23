@@ -42,6 +42,10 @@
 "action.right" = "→ 右";
 "action.leftCtrl" = "左 Ctrl";
 "action.rightCtrl" = "右 Ctrl";
+"action.mediaPlayPause" = "媒体播放/暂停";
+"action.systemVolumeUp" = "系统音量增加";
+"action.systemVolumeDown" = "系统音量降低";
+"action.systemMute" = "系统静音";
 "action.leftCmd" = "左 Cmd";
 "action.rightCmd" = "右 Cmd";
 "action.leftOpt" = "左 Opt";

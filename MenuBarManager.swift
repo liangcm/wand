@@ -37,11 +37,12 @@ enum RemoteAction: String, CaseIterable {
     case leftClick, rightClick
     case cursorUp, cursorDown, cursorLeft, cursorRight   // nudge the mouse cursor（方向环默认动作）
     case pageUp, pageDown
+    case mediaPlayPause, systemVolumeUp, systemVolumeDown, systemMute
     // 第 2 类 · F 键
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
     // 第 3 类 · 组合键（learnedShortcut = 自定义组合，兜底）
     case cmdC, cmdV, cmdX, cmdZ, cmdShiftZ, cmdA, cmdS, cmdW, cmdF
-    case ctrlB, ctrlC, ctrlD, ctrlR, ctrlY, ctrlGrave
+    case ctrlB, ctrlC, ctrlD, ctrlP, ctrlR, ctrlY, ctrlGrave
     case shiftTab, shiftComma, shiftPeriod
     case cmdF1, cmdF2, cmdF3, cmdF4, cmdF5, cmdF6, cmdF7, cmdF8, cmdF9, cmdF10, cmdF11, cmdF12
     case learnedShortcut
@@ -50,17 +51,24 @@ enum RemoteAction: String, CaseIterable {
 
     enum Category { case functionKey, fKey, combo, special }
 
+    var isNativeMediaAction: Bool {
+        switch self {
+        case .mediaPlayPause, .systemVolumeUp, .systemVolumeDown, .systemMute: return true
+        default: return false
+        }
+    }
+
     var category: Category {
         switch self {
         case .enter, .tab, .space, .backspace, .delete, .esc, .up, .down, .left, .right,
              .leftCtrl, .rightCtrl, .leftCmd, .rightCmd, .leftOpt, .rightOpt, .leftShift, .rightShift, .fn,
              .leftClick, .rightClick, .cursorUp, .cursorDown, .cursorLeft, .cursorRight,
-             .pageUp, .pageDown:
+             .pageUp, .pageDown, .mediaPlayPause, .systemVolumeUp, .systemVolumeDown, .systemMute:
             return .functionKey
         case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
             return .fKey
         case .cmdC, .cmdV, .cmdX, .cmdZ, .cmdShiftZ, .cmdA, .cmdS, .cmdW, .cmdF,
-             .ctrlB, .ctrlC, .ctrlD, .ctrlR, .ctrlY, .ctrlGrave,
+             .ctrlB, .ctrlC, .ctrlD, .ctrlP, .ctrlR, .ctrlY, .ctrlGrave,
              .shiftTab, .shiftComma, .shiftPeriod, .learnedShortcut,
              .cmdF1, .cmdF2, .cmdF3, .cmdF4, .cmdF5, .cmdF6, .cmdF7, .cmdF8, .cmdF9, .cmdF10, .cmdF11, .cmdF12:
             return .combo
@@ -98,6 +106,10 @@ enum RemoteAction: String, CaseIterable {
         case .cursorRight: return tr("action.cursorRight")
         case .pageUp: return tr("action.pageUp")
         case .pageDown: return tr("action.pageDown")
+        case .mediaPlayPause: return tr("action.mediaPlayPause")
+        case .systemVolumeUp: return tr("action.systemVolumeUp")
+        case .systemVolumeDown: return tr("action.systemVolumeDown")
+        case .systemMute: return tr("action.systemMute")
         case .f1: return "F1"; case .f2: return "F2"; case .f3: return "F3"; case .f4: return "F4"
         case .f5: return "F5"; case .f6: return "F6"; case .f7: return "F7"; case .f8: return "F8"
         case .f9: return "F9"; case .f10: return "F10"; case .f11: return "F11"; case .f12: return "F12"
@@ -113,6 +125,7 @@ enum RemoteAction: String, CaseIterable {
         case .ctrlB: return "Ctrl+B"
         case .ctrlC: return "Ctrl+C"
         case .ctrlD: return "Ctrl+D"
+        case .ctrlP: return "Ctrl+P"
         case .ctrlR: return "Ctrl+R"
         case .ctrlY: return "Ctrl+Y"
         case .ctrlGrave: return "Ctrl+·"
@@ -315,6 +328,10 @@ class MenuBarManager {
         loadLearnedShortcuts()
         loadDoubleClickMappings()
         applyTVMuteShortcutMigration()
+        applyMacTVTVShortcutMigration()
+        applyNativeMediaButtonMigration()
+        applyMacTVRemoteShortcutMigrationV2()
+        applyMuteDoubleEnterMigration()
         loadTextActions()
         loadAppActions()
         // Swipe-to-action was removed (gliding is purely cursor movement now) — drop the
@@ -356,16 +373,16 @@ class MenuBarManager {
 
     private func loadMappings() {
         let defaultMappings: [String: RemoteAction] = [
-            "playPause": .enter,
+            "playPause": .mediaPlayPause,
             "menu": .esc,
             "back": .esc,
             "select": .leftClick,
-            "volumeUp": .up,
-            "volumeDown": .down,
-            "siri": .space,
-            "tv": .ctrlD,
+            "volumeUp": .systemVolumeUp,
+            "volumeDown": .systemVolumeDown,
+            "siri": .ctrlB,
+            "tv": .ctrlP,
             "power": .none,
-            "mute": .ctrlY,
+            "mute": .systemMute,
             // 方向环点击默认平移光标；在面板里可改绑任意动作
             "dpadUp": .cursorUp,
             "dpadDown": .cursorDown,
@@ -415,18 +432,11 @@ class MenuBarManager {
         if let saved = UserDefaults.standard.dictionary(forKey: "doubleClickMappings") as? [String: String] {
             for (button, raw) in saved { if let action = RemoteAction.parse(raw) { doubleClickMappings[button] = action } }
         }
-        if doubleClickMappings["playPause"] == nil {
-            doubleClickMappings["playPause"] = .ctrlD
-        }
-        if doubleClickMappings["dpadUp"] == nil {
-            doubleClickMappings["dpadUp"] = .ctrlGrave
-        }
-        if doubleClickMappings["dpadLeft"] == nil {
-            doubleClickMappings["dpadLeft"] = .shiftComma
-        }
-        if doubleClickMappings["dpadRight"] == nil {
-            doubleClickMappings["dpadRight"] = .shiftPeriod
-        }
+        // Direction navigation must be immediate. Remove legacy bindings that forced
+        // up/left/right to wait through the 320ms double-click decision window.
+        doubleClickMappings.removeValue(forKey: "dpadUp")
+        doubleClickMappings.removeValue(forKey: "dpadLeft")
+        doubleClickMappings.removeValue(forKey: "dpadRight")
         saveDoubleClickMappings()   // converge migrated rawValues to the new form
     }
 
@@ -444,6 +454,55 @@ class MenuBarManager {
         doubleClickMappings["tv"] = .ctrlB
         doubleClickMappings["mute"] = .ctrlR
         saveMappings()
+        saveDoubleClickMappings()
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
+    /// Mac TV uses the TV button as its global summon/switch shortcut. Apply this once to
+    /// existing Wand installations without repeatedly overwriting later user customization.
+    private func applyMacTVTVShortcutMigration() {
+        let key = "macTVTVShortcutV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        buttonMappings["tv"] = .ctrlP
+        saveMappings()
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
+    /// Restore the Siri Remote's physical media controls for both fresh installs and the
+    /// existing Mac TV preference domain. Removing the old double-click actions also makes
+    /// play/pause and mute respond immediately instead of waiting for the click window.
+    private func applyNativeMediaButtonMigration() {
+        let key = "nativeMediaButtonsV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        buttonMappings["playPause"] = .mediaPlayPause
+        buttonMappings["volumeUp"] = .systemVolumeUp
+        buttonMappings["volumeDown"] = .systemVolumeDown
+        buttonMappings["mute"] = .systemMute
+        doubleClickMappings.removeValue(forKey: "playPause")
+        doubleClickMappings.removeValue(forKey: "mute")
+        saveMappings()
+        saveDoubleClickMappings()
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
+    /// Apply the Mac TV remote shortcuts requested for the TV and Siri buttons once, while
+    /// keeping them editable from Wand's mapping panel after migration.
+    private func applyMacTVRemoteShortcutMigrationV2() {
+        let key = "macTVRemoteShortcutsV2"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        buttonMappings["tv"] = .ctrlP
+        doubleClickMappings["tv"] = .ctrlD
+        buttonMappings["siri"] = .ctrlB
+        doubleClickMappings["siri"] = .ctrlY
+        saveMappings()
+        saveDoubleClickMappings()
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
+    private func applyMuteDoubleEnterMigration() {
+        let key = "muteDoubleEnterV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        doubleClickMappings["mute"] = .enter
         saveDoubleClickMappings()
         UserDefaults.standard.set(true, forKey: key)
     }
@@ -593,16 +652,26 @@ class MenuBarManager {
     func mapping(for target: MappingTarget) -> RemoteAction {
         switch target {
         case .button(let key):      return buttonMappings[key] ?? .none
-        case .doubleClick(let key): return doubleClickMappings[key] ?? .none
+        case .doubleClick(let key): return supportsDoubleClick(for: key) ? (doubleClickMappings[key] ?? .none) : .none
         }
     }
 
     func setMapping(_ action: RemoteAction, for target: MappingTarget) {
         switch target {
         case .button(let key):      buttonMappings[key] = action;      saveMappings()
-        case .doubleClick(let key): doubleClickMappings[key] = action; saveDoubleClickMappings()
+        case .doubleClick(let key):
+            if supportsDoubleClick(for: key) {
+                doubleClickMappings[key] = action
+            } else {
+                doubleClickMappings.removeValue(forKey: key)
+            }
+            saveDoubleClickMappings()
         }
         rebuildMenu()
+    }
+
+    func supportsDoubleClick(for button: String) -> Bool {
+        !["dpadUp", "dpadLeft", "dpadRight"].contains(button)
     }
 
     /// The actions offered for one input. Every input gets the full list; the data-backed
@@ -663,17 +732,16 @@ class MenuBarManager {
 
     func resetMappingsToDefaults() {
         buttonMappings = [
-            "playPause": .enter, "menu": .esc, "back": .esc, "select": .leftClick,
-            "volumeUp": .up, "volumeDown": .down, "siri": .space,
-            "tv": .ctrlD, "power": .none, "mute": .ctrlY,
+            "playPause": .mediaPlayPause, "menu": .esc, "back": .esc, "select": .leftClick,
+            "volumeUp": .systemVolumeUp, "volumeDown": .systemVolumeDown, "siri": .ctrlB,
+            "tv": .ctrlP, "power": .none, "mute": .systemMute,
             "dpadUp": .cursorUp, "dpadDown": .cursorDown,
             "dpadLeft": .cursorLeft, "dpadRight": .cursorRight
         ]
         // Also clear double-click bindings and every side table, or stale learned shortcuts /
         // text / app bindings would survive a "reset to defaults".
         doubleClickMappings = [
-            "playPause": .ctrlD, "tv": .ctrlB, "mute": .ctrlR,
-            "dpadUp": .ctrlGrave, "dpadLeft": .shiftComma, "dpadRight": .shiftPeriod
+            "tv": .ctrlD, "siri": .ctrlY, "mute": .enter
         ]
         learnedShortcuts = [:]
         textActions = [:]
@@ -695,7 +763,9 @@ class MenuBarManager {
         return buttonMappings[button] ?? .none
     }
 
-    func getDoubleClickMapping(for button: String) -> RemoteAction { doubleClickMappings[button] ?? .none }
+    func getDoubleClickMapping(for button: String) -> RemoteAction {
+        supportsDoubleClick(for: button) ? (doubleClickMappings[button] ?? .none) : .none
+    }
 
     /// Post the given string as a single keyboard event via `keyboardSetUnicodeString`.
     /// Works across terminals and most text fields; bypasses layout-specific key codes.
@@ -714,6 +784,10 @@ class MenuBarManager {
             up?.keyboardSetUnicodeString(stringLength: count, unicodeString: base)
             up?.post(tap: .cghidEventTap)
         }
+    }
+
+    func typeLiteral(_ text: String) {
+        typeString(text)
     }
 
     func executeTextAction(for key: String) {
@@ -798,6 +872,10 @@ class MenuBarManager {
         case .cursorRight: cursorController?.moveCursor(deltaX: dpadStep, deltaY: 0)
         case .pageUp:    sendKey(kVK_PageUp)
         case .pageDown:  sendKey(kVK_PageDown)
+        // Native media actions are deliberately handled by allowing the original system
+        // media-key event through MediaKeyInterceptor; the HID path must not synthesize a
+        // second event here.
+        case .mediaPlayPause, .systemVolumeUp, .systemVolumeDown, .systemMute: break
         // 第 2 类 · F 键
         case .f1:  sendKey(kVK_F1);  case .f2:  sendKey(kVK_F2);  case .f3:  sendKey(kVK_F3)
         case .f4:  sendKey(kVK_F4);  case .f5:  sendKey(kVK_F5);  case .f6:  sendKey(kVK_F6)
@@ -816,6 +894,7 @@ class MenuBarManager {
         case .ctrlB:     sendKey(kVK_ANSI_B, flags: .maskControl)
         case .ctrlC:     sendKey(kVK_ANSI_C, flags: .maskControl)
         case .ctrlD:     sendKey(kVK_ANSI_D, flags: .maskControl)
+        case .ctrlP:     sendKey(kVK_ANSI_P, flags: .maskControl)
         case .ctrlR:     sendKey(kVK_ANSI_R, flags: .maskControl)
         case .ctrlY:     sendKey(kVK_ANSI_Y, flags: .maskControl)
         case .ctrlGrave: sendKey(kVK_ANSI_Grave, flags: .maskControl)

@@ -5,7 +5,7 @@
 set -e
 
 APP_NAME="Wand"
-APP_BUNDLE="${APP_NAME}.app"
+APP_BUNDLE="${WAND_APP_OUTPUT:-${APP_NAME}.app}"
 
 if [ ! -f "$APP_NAME" ]; then
     echo "Error: $APP_NAME executable not found."
@@ -18,6 +18,7 @@ BINARY_NAME="$APP_NAME"
 echo "Creating app bundle: $APP_BUNDLE"
 
 # Create bundle structure
+rm -rf "$APP_BUNDLE"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${APP_BUNDLE}/Contents/Resources"
 
@@ -92,12 +93,15 @@ if [ -f "Wand.entitlements" ]; then
     echo "Signing with hardened runtime + entitlements..."
 
     # Override with WAND_CODESIGN_IDENTITY when needed. This Mac's development certificate
-    # is the stable default; fall back to ad-hoc on machines where it is unavailable.
+    # is the stable default. Never fall back to ad-hoc: its changing designated requirement
+    # makes macOS treat each rebuild as a different Accessibility client.
     SIGN_IDENTITY="${WAND_CODESIGN_IDENTITY:-F9B508DF6EACAB3F331C3823408358F490385A58}"
     if ! security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
-        echo "Stable signing identity unavailable; using ad-hoc signature"
-        SIGN_IDENTITY="-"
+        echo "ERROR: stable signing identity unavailable: $SIGN_IDENTITY" >&2
+        echo "Run the build with access to the login Keychain." >&2
+        exit 1
     fi
+    xattr -cr "${APP_BUNDLE}"
     codesign --force --options=runtime \
         --entitlements "Wand.entitlements" \
         --sign "$SIGN_IDENTITY" \

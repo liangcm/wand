@@ -36,6 +36,31 @@ enum SystemVolume {
         AudioObjectSetPropertyData(deviceID, &addr, 0, nil, size, &v)
     }
 
+    static func isMuted() -> Bool? {
+        guard let deviceID = defaultOutputDeviceID() else { return nil }
+        var muted: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &muted)
+        return status == noErr ? muted != 0 : nil
+    }
+
+    static func setMuted(_ muted: Bool) {
+        guard let deviceID = defaultOutputDeviceID() else { return }
+        var value: UInt32 = muted ? 1 : 0
+        let size = UInt32(MemoryLayout<UInt32>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectSetPropertyData(deviceID, &addr, 0, nil, size, &value)
+    }
+
     static func defaultOutputDeviceID() -> AudioObjectID? {
         var id = AudioObjectID(0)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)

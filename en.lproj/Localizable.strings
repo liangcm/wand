@@ -42,6 +42,10 @@
 "action.right" = "→ Right";
 "action.leftCtrl" = "Left Ctrl";
 "action.rightCtrl" = "Right Ctrl";
+"action.mediaPlayPause" = "Media Play/Pause";
+"action.systemVolumeUp" = "System Volume Up";
+"action.systemVolumeDown" = "System Volume Down";
+"action.systemMute" = "System Mute";
 "action.leftCmd" = "Left Cmd";
 "action.rightCmd" = "Right Cmd";
 "action.leftOpt" = "Left Opt";

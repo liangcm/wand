@@ -9,6 +9,10 @@
 import Cocoa
 import CoreGraphics
 
+// IOKit/hidsystem/ev_keymap.h exports this as NX_POWER_KEY (6), not NX_KEYTYPE_POWER.
+private let wandNXPowerKey = Int32(6)
+private let wandVirtualPowerKeyCode = Int64(0x7F)
+
 class MediaKeyInterceptor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -17,11 +21,14 @@ class MediaKeyInterceptor {
     var onMediaKey: ((MediaKeyType) -> Bool)?
     
     enum MediaKeyType {
-        case playPause, next, previous, volumeUp, volumeDown, mute
+        case playPause, next, previous, volumeUp, volumeDown, mute, power
     }
     
     func start() {
-        let eventMask: CGEventMask = 1 << 14 // NX_SYSDEFINED
+        let eventMask: CGEventMask =
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.keyUp.rawValue) |
+            (1 << 14) // NX_SYSDEFINED
         
         // HID-level tap intercepts media keys before the system handles them (more reliable than session tap).
         guard let tap = CGEvent.tapCreate(
@@ -36,6 +43,7 @@ class MediaKeyInterceptor {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
+            rmDebug("⚠️ Media key event tap could not be created")
             return
         }
         
@@ -45,6 +53,7 @@ class MediaKeyInterceptor {
         if let source = runLoopSource {
             CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
+            rmDebug("🛡 Media key event tap enabled (system-defined + keyboard power)")
         }
         
         // Re-enable tap after sleep/wake (system often disables taps during sleep).
@@ -81,7 +90,18 @@ class MediaKeyInterceptor {
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         // Re-enable tap when system disables it (timeout or user input); then consume the event.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            rmDebug("⚠️ Media key event tap disabled; re-enabling")
             reenableTap()
+            return nil
+        }
+
+        // A2854 can surface its power control as the keyboard Power virtual key (0x7F),
+        // independently of the Consumer-page HID value that Wand has already seized.
+        // Swallow both press and release before WindowServer can open the shutdown panel.
+        if type == .keyDown || type == .keyUp,
+           event.getIntegerValueField(.keyboardEventKeycode) == wandVirtualPowerKeyCode {
+            rmDebug("🛡 Consumed keyboard power event (type=\(type.rawValue))")
+            _ = onMediaKey?(.power)
             return nil
         }
         
@@ -95,17 +115,28 @@ class MediaKeyInterceptor {
             return Unmanaged.passRetained(event)
         }
         
-        // Check subtype 8 = media key event
-        guard nsEvent.subtype.rawValue == 8 else {
-            return Unmanaged.passRetained(event)
-        }
-        
         // Parse the key code from data1
         let keyCode = Int32((nsEvent.data1 & 0xFFFF0000) >> 16)
         let keyFlags = nsEvent.data1 & 0x0000FFFF
         let keyState = (keyFlags & 0xFF00) >> 8
         let isKeyDown = keyState == 0x0A
-        
+
+        // The Siri Remote also emits a native system power key alongside its HID button.
+        // Consume both down and up states when Wand owns it, otherwise macOS opens the
+        // shutdown/restart/sleep confirmation panel before our long-press sleep runs.
+        if keyCode == wandNXPowerKey,
+           let handler = onMediaKey,
+           handler(.power) {
+            rmDebug("🛡 Consumed NX power event (subtype=\(nsEvent.subtype.rawValue), state=\(keyState))")
+            return nil
+        }
+
+        // Check subtype 8 = media key event. Power is deliberately handled above because
+        // some macOS/A2854 combinations deliver it under a different system subtype.
+        guard nsEvent.subtype.rawValue == 8 else {
+            return Unmanaged.passRetained(event)
+        }
+
         // Only handle key down events
         guard isKeyDown else {
             return Unmanaged.passRetained(event)
@@ -126,6 +157,8 @@ class MediaKeyInterceptor {
             mediaKey = .volumeDown
         case NX_KEYTYPE_MUTE:
             mediaKey = .mute
+        case wandNXPowerKey:
+            mediaKey = .power
         default:
             break
         }

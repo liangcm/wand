@@ -53,6 +53,7 @@ class TouchHandler {
     private var lastTouchTime: UInt64 = 0
     private var touchStartTime: UInt64 = 0
     private var touchStartPosition: CGPoint = .zero
+    private var suppressButtonModeSelectionTouch = false
     
     private let cursorScale: CGFloat = 500.0
     private let tapMaxDuration: Double = 0.22
@@ -233,6 +234,11 @@ class TouchHandler {
     func handleTouches(touches: UnsafeMutablePointer<MTTouch>?, count: Int, timestamp: Double) {
         lastTouchTime = mach_absolute_time()
 
+        guard !suppressButtonModeSelectionTouch else {
+            cancelPointerGesture()
+            return
+        }
+
         guard isPointerInputEnabled?() ?? true else {
             cancelPointerGesture()
             return
@@ -376,6 +382,21 @@ class TouchHandler {
     /// mode is active and immediately when switching into it.
     func cancelCurrentGesture() {
         cancelPointerGesture()
+    }
+
+    /// A center click used to launch an app begins in button mode but physically ends after
+    /// the destination app is frontmost. Suppress touch/tap recognition across that boundary,
+    /// including a short grace period after the HID release reaches us.
+    func setButtonModeSelectionActive(_ active: Bool) {
+        cancelPointerGesture()
+        if active {
+            suppressButtonModeSelectionTouch = true
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.suppressButtonModeSelectionTouch = false
+            self?.cancelPointerGesture()
+        }
     }
 
     private func cancelPointerGesture() {

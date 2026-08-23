@@ -382,7 +382,9 @@ final class RemotePanelController: NSWindowController, NSWindowDelegate {
             // over and edits land on the new key's DOUBLE-click target. Not reset when the
             // selection is unchanged (clickModeChanged() re-enters here to refresh the menu).
             if selectionChanged { clickMode.selectedSegment = 0 }
-            clickMode.isEnabled = !locked
+            let supportsDoubleClick = manager.supportsDoubleClick(for: key)
+            if !supportsDoubleClick { clickMode.selectedSegment = 0 }
+            clickMode.isEnabled = !locked && supportsDoubleClick
         }
 
         rebuildMappingMenu(for: currentTarget, manager: manager)

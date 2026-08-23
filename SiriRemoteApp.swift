@@ -12,6 +12,7 @@ import Darwin
 import IOKit.hid
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let macTVModeNotification = Notification.Name("com.ray.mactv.wand.frontmost")
     
     private var statusItem: NSStatusItem!
     private var menuBarManager: MenuBarManager!
@@ -19,13 +20,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var remoteInputHandler: RemoteInputHandler?
     private var mediaKeyInterceptor: MediaKeyInterceptor?
     private var touchHandler: TouchHandler?
+    private var macTVModeObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var remoteRecoveryWork: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("🚀 Wand starting...")
 
-        // Bluetooth AVRCP play/pause signals bypass cghidEventTap and reach com.apple.rcd
-        // directly, which launches Music.app. Suspend rcd for this session; restored on exit.
-        RCDControl.suspend()
+        // Native media-button mappings need macOS's Remote Control Daemon. Restore it if an
+        // older Wand run left it unloaded, then let MediaKeyInterceptor decide per mapping.
+        RCDControl.restore()
 
         // Run as menu bar app (no dock icon)
         NSApp.setActivationPolicy(.accessory)
@@ -58,6 +62,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.menuBarManager?.updateControlMode(mode)
             self?.touchHandler?.cancelCurrentGesture()
         }
+        remoteInputHandler?.onButtonModeSelectStateChanged = { [weak self] active in
+            self?.touchHandler?.setButtonModeSelectionActive(active)
+        }
+        macTVModeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Self.macTVModeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let frontmost = notification.userInfo?["frontmost"] as? Bool else { return }
+            self?.remoteInputHandler?.setMacTVFrontmost(frontmost)
+        }
+        let macTVIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.ray.livingroommode"
+        remoteInputHandler?.setMacTVFrontmost(macTVIsFrontmost)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(frontmostApplicationDidChange(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
         if let mode = remoteInputHandler?.controlMode {
             menuBarManager.updateControlMode(mode)
         }
@@ -113,6 +136,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return self.handleInterceptedMediaKey(keyType)
         }
         mediaKeyInterceptor?.start()
+        remoteInputHandler?.onPowerButtonPressed = { [weak self] in
+            // The Siri Remote also mirrors its power press as a native NX power event.
+            // Re-enable the tap before that duplicate can reach macOS and open its shutdown UI.
+            self?.mediaKeyInterceptor?.reenableTap()
+        }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.mediaKeyInterceptor?.reenableTap()
+            self?.scheduleRemoteRecovery(after: 0.35, reason: "system wake")
+        }
 
         // Install the CoreAudio volume listener + baseline now, so the first remote volume
         // press already has something to revert AVRCP's system-volume change to.
@@ -133,10 +169,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func cleanup() {
+        remoteRecoveryWork?.cancel()
+        remoteRecoveryWork = nil
+        NSWorkspace.shared.notificationCenter.removeObserver(
+            self,
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
+        if let macTVModeObserver {
+            DistributedNotificationCenter.default().removeObserver(macTVModeObserver)
+            self.macTVModeObserver = nil
+        }
         touchHandler?.stop()
         remoteDetector?.stopDetection()
         mediaKeyInterceptor?.stop()
         RCDControl.restore()
+    }
+
+    private func scheduleRemoteRecovery(after delay: TimeInterval, reason: String) {
+        remoteRecoveryWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            rmDebug("🔄 Rebuilding remote HID connection after \(reason)")
+            self.remoteDetector?.stopDetection()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self else { return }
+                self.remoteDetector?.startDetection()
+                self.touchHandler?.tryReconnectTrackpad()
+                self.remoteRecoveryWork = nil
+            }
+        }
+        remoteRecoveryWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    @objc private func frontmostApplicationDidChange(_ notification: Notification) {
+        let isMacTV = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.ray.livingroommode"
+        remoteInputHandler?.setMacTVFrontmost(isMacTV)
     }
     
     // MARK: - Media Key Handling
@@ -165,6 +238,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         case .volumeUp:   buttonName = "volumeUp"
         case .volumeDown: buttonName = "volumeDown"
         case .mute:       buttonName = "mute"
+        case .power:      buttonName = "power"
+        }
+
+        // Power is fully owned by RemoteInputHandler: every press requests sleep. Never pass
+        // the mirrored native power event to macOS, because
+        // it opens the shutdown confirmation panel shown by the user.
+        if keyType == .power {
+            return true
+        }
+
+        // Wand owns the Siri Remote mute gesture until it can distinguish single, double,
+        // and long press. Consuming the underlying media event prevents double-click Enter
+        // and long-press text input from also toggling system mute.
+        if keyType == .mute, remoteInputHandler?.shouldConsumeMuteMediaKey == true {
+            return true
+        }
+
+        // 网易爆米花 uses Space for in-app playback. The HID path normally sends it first;
+        // consume the mirrored system-media event so one remote press cannot fire twice.
+        if keyType == .playPause,
+           NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.netease.filmlymac" {
+            if RemoteInputHandler.claimFilmlyPlayPauseDispatch() {
+                menuBarManager.execute(.space, storageKey: "filmly:playPause")
+            }
+            return true
+        }
+
+        let action = menuBarManager.getMapping(for: buttonName)
+        let isMatchingNativeAction: Bool
+        switch (keyType, action) {
+        case (.playPause, .mediaPlayPause),
+             (.volumeUp, .systemVolumeUp),
+             (.volumeDown, .systemVolumeDown),
+             (.mute, .systemMute):
+            isMatchingNativeAction = true
+        default:
+            isMatchingNativeAction = false
+        }
+        if isMatchingNativeAction {
+            return false
         }
 
         // Debounce: if the HID path just handled this button, don't double-fire.
@@ -175,9 +288,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        menuBarManager.execute(menuBarManager.getMapping(for: buttonName), storageKey: buttonName)
-        // Always consume — no action in this app corresponds to a system media key anymore,
-        // so we never want macOS's default media handler to fire.
+        menuBarManager.execute(action, storageKey: buttonName)
         return true
     }
     
@@ -216,8 +327,9 @@ enum RCDControl {
     }
 
     static func restore() {
-        guard suspended else { return }
         let domain = "gui/\(getuid())"
+        let service = "\(domain)/com.apple.rcd"
+        guard suspended || !isLoaded(service: service) else { return }
         let (status, err) = run(["bootstrap", domain, plistPath])
         if status == 0 {
             print("🔊 com.apple.rcd restored")
