@@ -65,10 +65,13 @@ class RemoteInputHandler {
     private var buttonState: [String: Bool] = [:]
     private var pendingSingleClicks: [String: DispatchWorkItem] = [:]
     private let doubleClickInterval: TimeInterval = 0.32
+    private var pendingDouyinSelectClick: DispatchWorkItem?
+    private let douyinSelectDoubleClickInterval: TimeInterval = 0.36
     private var tvPressActive = false
     private var tvLongPressTriggered = false
     private var tvLongPressWork: DispatchWorkItem?
-    private let tvLongPressInterval: TimeInterval = 2
+    private let tvLongPressInterval: TimeInterval = 1
+    private var missionControlOverlayActive = false
 
     private(set) var controlMode: RemoteControlMode
     private var isMacTVFrontmost = false
@@ -98,8 +101,48 @@ class RemoteInputHandler {
     /// Mac TV owns the remote mode while it is the frontmost app: its launcher uses button
     /// navigation, while every other app receives Wand's pointer/trackpad behavior.
     func setMacTVFrontmost(_ frontmost: Bool) {
+        if missionControlOverlayActive {
+            // Mission Control does not itself replace Mac TV as the frontmost application.
+            // A later real activation/resignation means the overlay has been dismissed.
+            missionControlOverlayActive = false
+            rmDebug("🌐 Mission Control overlay ended — TV button restored")
+        }
         isMacTVFrontmost = frontmost
         applyControlMode(frontmost ? .buttons : .trackpad, reason: "Mac TV frontmost=\(frontmost)")
+    }
+
+    /// Mission Control is a Dock-owned system overlay and does not replace Mac TV as the
+    /// frontmost application. Explicitly release button mode so the touch surface can move
+    /// and click the pointer while the overlay is visible.
+    func prepareForMissionControl() {
+        if missionControlOverlayActive {
+            missionControlOverlayActive = false
+            let macTVIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.ray.livingroommode"
+            applyControlMode(macTVIsFrontmost ? .buttons : .trackpad,
+                             reason: "Mission Control toggled closed")
+            rmDebug("🌐 Mission Control toggled closed — TV button restored")
+            return
+        }
+        missionControlOverlayActive = true
+        cancelTVLongPress()
+        tvPressActive = false
+        pendingSingleClicks.removeValue(forKey: "tv")?.cancel()
+        applyControlMode(.trackpad, reason: "Mission Control opened over Mac TV")
+    }
+
+    /// A center press or light tap normally selects a Mission Control window and dismisses
+    /// the overlay. Wait for that selection to settle, then restore TV-button handling even
+    /// when the selected window is Mac TV and no workspace activation notification is sent.
+    func missionControlPointerSelectionCompleted() {
+        guard missionControlOverlayActive else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+            guard let self, self.missionControlOverlayActive else { return }
+            self.missionControlOverlayActive = false
+            let macTVIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.ray.livingroommode"
+            self.applyControlMode(macTVIsFrontmost ? .buttons : .trackpad,
+                                  reason: "Mission Control pointer selection completed")
+            rmDebug("🌐 Mission Control selection completed — TV button restored")
+        }
     }
 
     private func applyControlMode(_ mode: RemoteControlMode, reason: String) {
@@ -118,6 +161,7 @@ class RemoteInputHandler {
 
     deinit {
         powerSleepWork?.cancel()
+        pendingDouyinSelectClick?.cancel()
         cancelTVLongPress()
         cancelMuteLongPress()
         cancelBackLongPress()
@@ -142,6 +186,8 @@ class RemoteInputHandler {
             powerSleepWork?.cancel()
             powerSleepWork = nil
             powerPressActive = false
+            pendingDouyinSelectClick?.cancel()
+            pendingDouyinSelectClick = nil
             cancelTVLongPress()
             tvPressActive = false
             cancelMuteLongPress()
@@ -385,8 +431,7 @@ class RemoteInputHandler {
                 rmDebug("🖱 Select released → end drag")
                 cursorController.mouseUp()
             } else {
-                rmDebug("🖱 Select short press → clean click")
-                cursorController.performClick()
+                handleSelectShortPress()
             }
             selectBecameDrag = false
             
@@ -394,6 +439,33 @@ class RemoteInputHandler {
                 self?.cursorController.isClickActive = false
             }
         }
+    }
+
+    private func handleSelectShortPress() {
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.bytedance.douyin.desktop" else {
+            rmDebug("🖱 Select short press → clean click")
+            cursorController.performClick()
+            missionControlPointerSelectionCompleted()
+            return
+        }
+
+        if let pending = pendingDouyinSelectClick {
+            pending.cancel()
+            pendingDouyinSelectClick = nil
+            rmDebug("🖱 Douyin center double press detected")
+            cursorController.performDouyinSessionClick()
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingDouyinSelectClick = nil
+            rmDebug("🖱 Douyin center single press → normal click")
+            self.cursorController.performClick()
+        }
+        pendingDouyinSelectClick = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + douyinSelectDoubleClickInterval,
+                                      execute: work)
     }
 
     private func handlePowerButton(pressed: Bool) {
@@ -421,6 +493,10 @@ class RemoteInputHandler {
     }
 
     private func handleTVButton(pressed: Bool) {
+        guard !missionControlOverlayActive else {
+            rmDebug("📺 TV \(pressed ? "press" : "release") ignored while Mission Control is open")
+            return
+        }
         if pressed {
             guard !tvPressActive else { return }
             tvPressActive = true
@@ -431,7 +507,7 @@ class RemoteInputHandler {
                 self.tvLongPressTriggered = true
                 self.pendingSingleClicks.removeValue(forKey: "tv")?.cancel()
                 self.menuBarManager?.execute(.ctrlGrave, storageKey: "long:tv")
-                rmDebug("📺 TV held for 2.00s — Ctrl+·")
+                rmDebug("📺 TV held for 1.00s — Ctrl+·")
             }
             tvLongPressWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + tvLongPressInterval, execute: work)
@@ -589,6 +665,14 @@ class RemoteInputHandler {
 
         let action = menuBarManager?.getMapping(for: button) ?? .none
         executeAction(action, button: button, pressed: true)
+        if missionControlOverlayActive {
+            // Escape dismisses Mission Control without necessarily producing an application
+            // activation notification because Mac TV can remain frontmost underneath it.
+            missionControlOverlayActive = false
+            let macTVIsFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.ray.livingroommode"
+            setMacTVFrontmost(macTVIsFrontmost)
+            rmDebug("🌐 Mission Control dismissed by Return/Esc — TV button restored")
+        }
     }
 
     private func cancelBackLongPress() {

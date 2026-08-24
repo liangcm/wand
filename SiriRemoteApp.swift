@@ -65,6 +65,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         remoteInputHandler?.onButtonModeSelectStateChanged = { [weak self] active in
             self?.touchHandler?.setButtonModeSelectionActive(active)
         }
+        menuBarManager.onMissionControlWillOpen = { [weak self] in
+            self?.remoteInputHandler?.prepareForMissionControl()
+        }
         macTVModeObserver = DistributedNotificationCenter.default().addObserver(
             forName: Self.macTVModeNotification,
             object: nil,
@@ -98,6 +101,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Tap-to-click respects the panel toggle, read live on each tap.
         touchHandler?.isTapEnabled = { [weak menuBarManager] in
             menuBarManager?.tapToClickEnabled ?? true
+        }
+        touchHandler?.onPointerClick = { [weak self] in
+            self?.remoteInputHandler?.missionControlPointerSelectionCompleted()
         }
         // Button mode blocks all direct trackpad gestures while keeping the device attached
         // so switching back to trackpad mode is immediate.

@@ -72,6 +72,9 @@ class TouchHandler {
 
     /// Fired mid-gesture when a multi-finger pinch-in is detected. Dispatched on main.
     var onPinch: (() -> Void)?
+    /// Fired after a light tap posts its pointer click. Used to finish system overlays that
+    /// do not generate a normal frontmost-application transition.
+    var onPointerClick: (() -> Void)?
     /// Returns whether tap-to-click is currently enabled; nil defaults to enabled.
     var isTapEnabled: (() -> Bool)?
     /// Returns whether direct trackpad input may control the Mac. Button mode keeps the
@@ -374,6 +377,7 @@ class TouchHandler {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 self.cursorController.performClick()
+                self.onPointerClick?()
             }
         }
     }

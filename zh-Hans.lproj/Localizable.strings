@@ -43,6 +43,7 @@
 "action.leftCtrl" = "左 Ctrl";
 "action.rightCtrl" = "右 Ctrl";
 "action.mediaPlayPause" = "媒体播放/暂停";
+"action.missionControl" = "调度中心";
 "action.systemVolumeUp" = "系统音量增加";
 "action.systemVolumeDown" = "系统音量降低";
 "action.systemMute" = "系统静音";

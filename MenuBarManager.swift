@@ -37,7 +37,7 @@ enum RemoteAction: String, CaseIterable {
     case leftClick, rightClick
     case cursorUp, cursorDown, cursorLeft, cursorRight   // nudge the mouse cursor（方向环默认动作）
     case pageUp, pageDown
-    case mediaPlayPause, systemVolumeUp, systemVolumeDown, systemMute
+    case mediaPlayPause, systemVolumeUp, systemVolumeDown, systemMute, missionControl
     // 第 2 类 · F 键
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
     // 第 3 类 · 组合键（learnedShortcut = 自定义组合，兜底）
@@ -63,7 +63,8 @@ enum RemoteAction: String, CaseIterable {
         case .enter, .tab, .space, .backspace, .delete, .esc, .up, .down, .left, .right,
              .leftCtrl, .rightCtrl, .leftCmd, .rightCmd, .leftOpt, .rightOpt, .leftShift, .rightShift, .fn,
              .leftClick, .rightClick, .cursorUp, .cursorDown, .cursorLeft, .cursorRight,
-             .pageUp, .pageDown, .mediaPlayPause, .systemVolumeUp, .systemVolumeDown, .systemMute:
+             .pageUp, .pageDown, .mediaPlayPause, .systemVolumeUp, .systemVolumeDown, .systemMute,
+             .missionControl:
             return .functionKey
         case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
             return .fKey
@@ -110,6 +111,7 @@ enum RemoteAction: String, CaseIterable {
         case .systemVolumeUp: return tr("action.systemVolumeUp")
         case .systemVolumeDown: return tr("action.systemVolumeDown")
         case .systemMute: return tr("action.systemMute")
+        case .missionControl: return tr("action.missionControl")
         case .f1: return "F1"; case .f2: return "F2"; case .f3: return "F3"; case .f4: return "F4"
         case .f5: return "F5"; case .f6: return "F6"; case .f7: return "F7"; case .f8: return "F8"
         case .f9: return "F9"; case .f10: return "F10"; case .f11: return "F11"; case .f12: return "F12"
@@ -300,6 +302,7 @@ class MenuBarManager {
     /// Shared cursor state (owned by the app delegate) so cursor-nudge actions stay consistent
     /// with the trackpad path — same clamping, same multi-display handling.
     weak var cursorController: CursorController?
+    var onMissionControlWillOpen: (() -> Void)?
 
     /// How far each trackpad direction click nudges the cursor. User-tunable via the panel slider.
     private(set) var dpadStep: CGFloat = 20
@@ -331,6 +334,7 @@ class MenuBarManager {
         applyMacTVTVShortcutMigration()
         applyNativeMediaButtonMigration()
         applyMacTVRemoteShortcutMigrationV2()
+        applySiriMissionControlMigration()
         applyMuteDoubleEnterMigration()
         removeVolumeUpDoubleShortcutMigration()
         loadTextActions()
@@ -380,7 +384,7 @@ class MenuBarManager {
             "select": .leftClick,
             "volumeUp": .systemVolumeUp,
             "volumeDown": .systemVolumeDown,
-            "siri": .ctrlB,
+            "siri": .missionControl,
             "tv": .ctrlP,
             "power": .none,
             "mute": .systemMute,
@@ -495,6 +499,18 @@ class MenuBarManager {
         doubleClickMappings["tv"] = .ctrlD
         buttonMappings["siri"] = .ctrlB
         doubleClickMappings["siri"] = .ctrlY
+        saveMappings()
+        saveDoubleClickMappings()
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
+    /// Apply the current Siri-button behavior once to existing installations without
+    /// repeatedly overwriting later changes made in the mapping panel.
+    private func applySiriMissionControlMigration() {
+        let key = "siriMissionControlShortcutV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        buttonMappings["siri"] = .missionControl
+        doubleClickMappings["siri"] = .ctrlB
         saveMappings()
         saveDoubleClickMappings()
         UserDefaults.standard.set(true, forKey: key)
@@ -742,7 +758,7 @@ class MenuBarManager {
     func resetMappingsToDefaults() {
         buttonMappings = [
             "playPause": .mediaPlayPause, "menu": .esc, "back": .esc, "select": .leftClick,
-            "volumeUp": .systemVolumeUp, "volumeDown": .systemVolumeDown, "siri": .ctrlB,
+            "volumeUp": .systemVolumeUp, "volumeDown": .systemVolumeDown, "siri": .missionControl,
             "tv": .ctrlP, "power": .none, "mute": .systemMute,
             "dpadUp": .cursorUp, "dpadDown": .cursorDown,
             "dpadLeft": .cursorLeft, "dpadRight": .cursorRight
@@ -750,7 +766,7 @@ class MenuBarManager {
         // Also clear double-click bindings and every side table, or stale learned shortcuts /
         // text / app bindings would survive a "reset to defaults".
         doubleClickMappings = [
-            "tv": .ctrlD, "siri": .ctrlY, "mute": .enter
+            "tv": .ctrlD, "siri": .ctrlB, "mute": .enter
         ]
         learnedShortcuts = [:]
         textActions = [:]
@@ -885,6 +901,7 @@ class MenuBarManager {
         // media-key event through MediaKeyInterceptor; the HID path must not synthesize a
         // second event here.
         case .mediaPlayPause, .systemVolumeUp, .systemVolumeDown, .systemMute: break
+        case .missionControl: openMissionControl()
         // 第 2 类 · F 键
         case .f1:  sendKey(kVK_F1);  case .f2:  sendKey(kVK_F2);  case .f3:  sendKey(kVK_F3)
         case .f4:  sendKey(kVK_F4);  case .f5:  sendKey(kVK_F5);  case .f6:  sendKey(kVK_F6)
@@ -970,6 +987,28 @@ class MenuBarManager {
         down?.post(tap: .cghidEventTap)
         usleep(10000)
         up?.post(tap: .cghidEventTap)
+    }
+
+    /// Open the system Mission Control launcher directly. This remains reliable when the
+    /// user's Control-Up keyboard shortcut has been changed or disabled in System Settings.
+    private func openMissionControl() {
+        onMissionControlWillOpen?()
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name("com.ray.mactv.systemOverlayWillOpen"),
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
+        let url = URL(fileURLWithPath: "/System/Applications/Mission Control.app")
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
+            if let error {
+                rmDebug("⚠️ Unable to open Mission Control: \(error.localizedDescription)")
+            } else {
+                rmDebug("🌐 Mission Control opened directly")
+            }
+        }
     }
 
     /// Tap a modifier key alone (e.g. Right Command) — used to trigger push-to-talk dictation.

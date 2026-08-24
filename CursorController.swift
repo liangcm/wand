@@ -9,6 +9,7 @@ import CoreGraphics
 import CoreFoundation
 import Foundation
 import AppKit
+import ApplicationServices
 
 class CursorController {
     private let sensitivity: CGFloat = 2.0
@@ -21,6 +22,7 @@ class CursorController {
     }()
     private var lastPostedCursorPosition: CGPoint?
     private var lastPostedCursorPositionTime: Date = .distantPast
+    private var mouseEventSequence: Int64 = 1
     
     var isDragging: Bool = false
     var isClickActive: Bool = false
@@ -126,35 +128,113 @@ class CursorController {
     }
     
     func performClick() {
-        let currentPosition = CGEvent(source: nil)?.location ?? .zero
+        let currentPosition = currentCursorPosition()
+        if performFrontmostAccessibilityPress(at: currentPosition) {
+            return
+        }
+
+        let isDouyin = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.bytedance.douyin.desktop"
+        let eventNumber = mouseEventSequence
+        mouseEventSequence &+= 1
+
+        // Chromium-based apps such as Douyin expect a complete pointer sequence. Reassert
+        // hover at the cached cursor position, then send a matched down/up pair with a real
+        // click-state and event number instead of two anonymous 10ms Quartz events.
+        if isDouyin,
+           let hoverEvent = CGEvent(mouseEventSource: mouseEventSource,
+                                    mouseType: .mouseMoved,
+                                    mouseCursorPosition: currentPosition,
+                                    mouseButton: .left) {
+            hoverEvent.setIntegerValueField(.mouseEventDeltaX, value: 0)
+            hoverEvent.setIntegerValueField(.mouseEventDeltaY, value: 0)
+            hoverEvent.post(tap: .cghidEventTap)
+            usleep(8000)
+        }
         
         // Mouse down
-        guard let downEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: currentPosition, mouseButton: .left) else {
+        guard let downEvent = CGEvent(mouseEventSource: mouseEventSource, mouseType: .leftMouseDown, mouseCursorPosition: currentPosition, mouseButton: .left) else {
             return
         }
+        downEvent.setIntegerValueField(.mouseEventClickState, value: 1)
+        downEvent.setIntegerValueField(.mouseEventNumber, value: eventNumber)
         downEvent.post(tap: CGEventTapLocation.cghidEventTap)
         
-        // Small delay
-        usleep(10000) // 10ms
+        // Douyin drops unrealistically short synthetic presses; use a normal physical-click
+        // duration there while retaining the snappier path for other applications.
+        usleep(isDouyin ? 55_000 : 15_000)
         
         // Mouse up
-        guard let upEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: currentPosition, mouseButton: .left) else {
+        guard let upEvent = CGEvent(mouseEventSource: mouseEventSource, mouseType: .leftMouseUp, mouseCursorPosition: currentPosition, mouseButton: .left) else {
             return
         }
+        upEvent.setIntegerValueField(.mouseEventClickState, value: 1)
+        upEvent.setIntegerValueField(.mouseEventNumber, value: eventNumber)
         upEvent.post(tap: CGEventTapLocation.cghidEventTap)
+        rmDebug("🖱 Posted complete click app=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown") x=\(Int(currentPosition.x)) y=\(Int(currentPosition.y))")
+    }
+
+    /// Douyin ignores the HID-layer synthetic clicks used by the normal trackpad path on
+    /// some releases. A deliberate double press of the remote's center button uses this
+    /// independent WindowServer session path to deliver one plain left click.
+    func performDouyinSessionClick() {
+        let currentPosition = currentCursorPosition()
+        let source = CGEventSource(stateID: .combinedSessionState)
+        source?.localEventsSuppressionInterval = 0
+
+        guard let downEvent = CGEvent(mouseEventSource: source,
+                                      mouseType: .leftMouseDown,
+                                      mouseCursorPosition: currentPosition,
+                                      mouseButton: .left),
+              let upEvent = CGEvent(mouseEventSource: source,
+                                    mouseType: .leftMouseUp,
+                                    mouseCursorPosition: currentPosition,
+                                    mouseButton: .left) else { return }
+        downEvent.setIntegerValueField(.mouseEventClickState, value: 1)
+        upEvent.setIntegerValueField(.mouseEventClickState, value: 1)
+        downEvent.post(tap: .cgSessionEventTap)
+        usleep(80_000)
+        upEvent.post(tap: .cgSessionEventTap)
+        rmDebug("🖱 Douyin center double press → session left click x=\(Int(currentPosition.x)) y=\(Int(currentPosition.y))")
+    }
+
+    /// Chromium exposes many controls as accessibility buttons even when it ignores a Quartz
+    /// click. Prefer AXPress for the exact element under the pointer in Douyin, then fall back
+    /// to the complete mouse sequence above for video surfaces and non-AX elements.
+    private func performFrontmostAccessibilityPress(at point: CGPoint) -> Bool {
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.bytedance.douyin.desktop" else {
+            return false
+        }
+        let systemWide = AXUIElementCreateSystemWide()
+        var element: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element) == .success,
+              let element else {
+            return false
+        }
+        var actionNames: CFArray?
+        guard AXUIElementCopyActionNames(element, &actionNames) == .success,
+              let names = actionNames as? [String],
+              names.contains(kAXPressAction as String) else {
+            return false
+        }
+        let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
+        if result == .success {
+            rmDebug("🖱 Douyin click delivered through AXPress x=\(Int(point.x)) y=\(Int(point.y))")
+            return true
+        }
+        return false
     }
     
     func mouseDown() {
-        let currentPosition = CGEvent(source: nil)?.location ?? .zero
-        guard let event = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: currentPosition, mouseButton: .left) else {
+        let currentPosition = currentCursorPosition()
+        guard let event = CGEvent(mouseEventSource: mouseEventSource, mouseType: .leftMouseDown, mouseCursorPosition: currentPosition, mouseButton: .left) else {
             return
         }
         event.post(tap: CGEventTapLocation.cghidEventTap)
     }
     
     func mouseUp() {
-        let currentPosition = CGEvent(source: nil)?.location ?? .zero
-        guard let event = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: currentPosition, mouseButton: .left) else {
+        let currentPosition = currentCursorPosition()
+        guard let event = CGEvent(mouseEventSource: mouseEventSource, mouseType: .leftMouseUp, mouseCursorPosition: currentPosition, mouseButton: .left) else {
             return
         }
         event.post(tap: CGEventTapLocation.cghidEventTap)
