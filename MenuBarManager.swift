@@ -337,6 +337,7 @@ class MenuBarManager {
         applySiriMissionControlMigration()
         applyMuteDoubleEnterMigration()
         removeVolumeUpDoubleShortcutMigration()
+        applyFinalMacTVMappingsMigration()
         loadTextActions()
         loadAppActions()
         // Swipe-to-action was removed (gliding is purely cursor movement now) — drop the
@@ -528,6 +529,31 @@ class MenuBarManager {
         let key = "removeVolumeUpDoubleCtrlGraveV1"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         doubleClickMappings.removeValue(forKey: "volumeUp")
+        saveDoubleClickMappings()
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
+    /// Converge installations that accumulated experimental mappings to the final Mac TV
+    /// behavior requested by the user. This runs once; the mapping panel remains editable.
+    private func applyFinalMacTVMappingsMigration() {
+        let key = "finalMacTVMappingsV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        buttonMappings["playPause"] = .mediaPlayPause
+        buttonMappings["menu"] = .cmdW
+        buttonMappings["back"] = .cmdW
+        buttonMappings["select"] = .leftClick
+        buttonMappings["volumeUp"] = .systemVolumeUp
+        buttonMappings["volumeDown"] = .systemVolumeDown
+        buttonMappings["siri"] = .missionControl
+        buttonMappings["tv"] = .ctrlP
+        buttonMappings["power"] = RemoteAction.none
+        buttonMappings["mute"] = .systemMute
+        buttonMappings["dpadUp"] = .up
+        buttonMappings["dpadDown"] = .down
+        buttonMappings["dpadLeft"] = .left
+        buttonMappings["dpadRight"] = .right
+        doubleClickMappings = ["tv": .ctrlD]
+        saveMappings()
         saveDoubleClickMappings()
         UserDefaults.standard.set(true, forKey: key)
     }

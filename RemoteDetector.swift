@@ -70,13 +70,11 @@ class RemoteDetector {
             return
         }
 
-        // Only match Consumer (buttons) and Digitizer (touch) pages.
-        // Generic Desktop (0x01) and Apple Vendor (0xFF00) are intentionally
-        // excluded — they share HID protocols with Bluetooth mice/keyboards
-        // and IOHIDManagerOpen can interfere with those peripherals.
+        // Only seize Consumer interfaces used by the physical buttons. TouchHandler owns
+        // the Digitizer interface through MultitouchSupport; opening that same interface
+        // here can starve the touch callback while leaving every button functional.
         let matchingDicts: [[String: Any]] = [
             [kIOHIDVendorIDKey: appleVendorID, kIOHIDPrimaryUsagePageKey: 0x0C],   // Consumer Page (buttons)
-            [kIOHIDVendorIDKey: appleVendorID, kIOHIDPrimaryUsagePageKey: 0x0D],   // Digitizer / Game Controls (touch)
         ]
         IOHIDManagerSetDeviceMatchingMultiple(manager, matchingDicts as CFArray)
 

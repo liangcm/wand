@@ -64,9 +64,9 @@ class RemoteInputHandler {
     /// fires the callback N times. This collapses dup events to a single state transition.
     private var buttonState: [String: Bool] = [:]
     private var pendingSingleClicks: [String: DispatchWorkItem] = [:]
-    private let doubleClickInterval: TimeInterval = 0.32
+    private let doubleClickInterval: TimeInterval = 0.256
     private var pendingDouyinSelectClick: DispatchWorkItem?
-    private let douyinSelectDoubleClickInterval: TimeInterval = 0.36
+    private let douyinSelectDoubleClickInterval: TimeInterval = 0.288
     private var tvPressActive = false
     private var tvLongPressTriggered = false
     private var tvLongPressWork: DispatchWorkItem?
@@ -549,56 +549,42 @@ class RemoteInputHandler {
     }
 
     private func handleMuteButton(pressed: Bool) {
+        // Away from login/lock screen the mute button is a plain native media key. Do not
+        // introduce double-click or long-press timing, and let the mirrored NX event pass.
+        guard isLoginOrLockScreenActive() else {
+            cancelMuteLongPress()
+            rmDebug("🔇 Mute \(pressed ? "press" : "release") on desktop — native system mute")
+            return
+        }
+
+        // On login/lock screen: one press sends Enter, two presses type "jade". There is no
+        // long-press action in this context.
         if pressed {
             mutePressActive = true
-            muteLongPressWork?.cancel()
-            muteLongPressTriggered = false
             if let pendingSingle = muteSingleClickWork {
                 pendingSingle.cancel()
                 muteSingleClickWork = nil
                 muteSecondPress = true
             } else {
                 muteSecondPress = false
-                muteStateBeforePress = SystemVolume.isMuted()
             }
-            let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.muteLongPressTriggered = true
-                self.restoreMuteStateBeforeGesture()
-                self.menuBarManager?.typeLiteral("jade")
-                rmDebug("🔇 Mute held for 1.00s — typed literal text: jade")
-            }
-            muteLongPressWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + muteLongPressInterval, execute: work)
             return
         }
 
         mutePressActive = false
-        muteLongPressWork?.cancel()
-        muteLongPressWork = nil
-        if muteLongPressTriggered {
-            muteLongPressTriggered = false
-            muteSecondPress = false
-            muteStateBeforePress = nil
-            return
-        }
 
         if muteSecondPress {
             muteSecondPress = false
-            restoreMuteStateBeforeGesture()
-            muteStateBeforePress = nil
-            let doubleAction = menuBarManager?.getDoubleClickMapping(for: "mute") ?? .enter
-            menuBarManager?.execute(doubleAction, storageKey: "double:mute")
-            rmDebug("🔇 Mute double press — Enter")
+            menuBarManager?.typeLiteral("jade")
+            rmDebug("🔇 Mute double press on login/lock screen — typed literal text: jade")
             return
         }
 
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.muteSingleClickWork = nil
-            self.performSingleMuteAction()
-            self.muteStateBeforePress = nil
-            rmDebug("🔇 Mute single press — native system mute")
+            self.menuBarManager?.execute(.enter, storageKey: "lock:mute")
+            rmDebug("🔇 Mute single press on login/lock screen — Enter")
         }
         muteSingleClickWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + doubleClickInterval, execute: work)
@@ -616,7 +602,17 @@ class RemoteInputHandler {
     }
 
     var shouldConsumeMuteMediaKey: Bool {
-        mutePressActive || muteSingleClickWork != nil || muteSecondPress || muteLongPressTriggered
+        isLoginOrLockScreenActive()
+    }
+
+    private func isLoginOrLockScreenActive() -> Bool {
+        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.loginwindow" {
+            return true
+        }
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else {
+            return false
+        }
+        return session["CGSSessionScreenIsLocked"] as? Bool ?? false
     }
 
     private func restoreMuteStateBeforeGesture() {

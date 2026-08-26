@@ -163,18 +163,40 @@ class TouchHandler {
     private func findAndStartDevice() {
         guard let cfArray = MTDeviceCreateList()?.takeRetainedValue() else { return }
         let deviceList = cfArray as [MTDevice]
-        // Find non-built-in device (Siri Remote)
+
+        // More than one external Multitouch device may be present (for example a Magic
+        // Trackpad plus Siri Remote). Enumeration order is not stable, so selecting the first
+        // non-built-in device can silently attach Wand to the Magic Trackpad. A2854 exposes a
+        // compact square 2775 x 2775 surface and currently reports family 0x91.
+        var fallbackRemote: MTDevice?
         for dev in deviceList {
-            if !MTDeviceIsBuiltIn(dev) {
+            guard !MTDeviceIsBuiltIn(dev) else { continue }
+
+            var family: Int32 = 0
+            var width: Int32 = 0
+            var height: Int32 = 0
+            MTDeviceGetFamilyID(dev, &family)
+            MTDeviceGetSensorSurfaceDimensions(dev, &width, &height)
+            rmDebug(String(format: "📱 MT candidate family=0x%X size=%dx%d running=%@",
+                           family, width, height, MTDeviceIsRunning(dev) ? "YES" : "NO"))
+
+            if family == 0x91 {
                 startDevice(dev)
                 return
             }
+
+            let compactSquareSurface = width > 0 && height > 0 &&
+                width <= 5_000 && height <= 5_000 && abs(width - height) <= 1_000
+            if compactSquareSurface {
+                fallbackRemote = dev
+            }
         }
-        // Fallback: use second device if available
-        if deviceList.count > 1 {
-            startDevice(deviceList[1])
+
+        if let fallbackRemote {
+            startDevice(fallbackRemote)
         } else if device != nil {
-            // Clear stale ref so next checkAndReconnect will retry when the remote reappears in the list.
+            // Do not fall back to an arbitrary external device: it may be the user's Magic
+            // Trackpad. Clear stale state and retry when the remote appears.
             stopDevice()
         }
     }
