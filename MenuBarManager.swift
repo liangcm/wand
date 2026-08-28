@@ -280,6 +280,8 @@ class MenuBarManager {
     
     private let statusItem: NSStatusItem
     private let menu: NSMenu
+    private let airPodsController: AirPodsController
+    private let airPodsStatusHUD = AirPodsStatusHUD()
     private let statusMenuItem: NSMenuItem
     private let modeMenuItem: NSMenuItem
     private var remotePanelController: RemotePanelController?
@@ -320,8 +322,9 @@ class MenuBarManager {
         UserDefaults.standard.set(enabled, forKey: "tapToClickEnabled")
     }
 
-    init(statusItem: NSStatusItem) {
+    init(statusItem: NSStatusItem, airPodsController: AirPodsController) {
         self.statusItem = statusItem
+        self.airPodsController = airPodsController
         self.menu = NSMenu()
         self.statusMenuItem = NSMenuItem(title: tr("status.disconnected"), action: nil, keyEquivalent: "")
         self.modeMenuItem = NSMenuItem(title: tr("mode.trackpad"), action: nil, keyEquivalent: "")
@@ -648,6 +651,37 @@ class MenuBarManager {
 
         menu.addItem(NSMenuItem.separator())
 
+        let airPodsToggleItem = NSMenuItem(
+            title: airPodsController.isBusy ? tr("airpods.busy") : airPodsController.menuTitle,
+            action: #selector(toggleAirPods),
+            keyEquivalent: "\\"
+        )
+        airPodsToggleItem.keyEquivalentModifierMask = [.control]
+        airPodsToggleItem.target = self
+        menu.addItem(airPodsToggleItem)
+
+        let deviceItem = NSMenuItem(title: tr("airpods.choose"), action: nil, keyEquivalent: "")
+        let deviceMenu = NSMenu()
+        let devices = airPodsController.deviceSummaries()
+        if devices.isEmpty {
+            let none = NSMenuItem(title: tr("airpods.notFound"), action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            deviceMenu.addItem(none)
+        } else {
+            for device in devices {
+                let item = NSMenuItem(title: device.name, action: #selector(selectAirPods(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = device.address
+                item.state = device.isSelected ? .on : .off
+                if device.isConnected { item.title += " · \(tr("airpods.connected"))" }
+                deviceMenu.addItem(item)
+            }
+        }
+        deviceItem.submenu = deviceMenu
+        menu.addItem(deviceItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // Quit
         let quitItem = NSMenuItem(title: tr("menu.quit"), action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
@@ -664,6 +698,26 @@ class MenuBarManager {
         }
         NSApp.activate(ignoringOtherApps: true)
         pairingGuideController?.showWindow(nil)
+    }
+
+    @objc private func toggleAirPods() {
+        airPodsController.toggle()
+    }
+
+    @objc private func selectAirPods(_ sender: NSMenuItem) {
+        guard let address = sender.representedObject as? String else { return }
+        airPodsController.select(address: address)
+        rebuildMenu()
+    }
+
+    func refreshAirPodsMenu() {
+        rebuildMenu()
+    }
+
+    func showAirPodsFeedback(_ message: String, state: AirPodsFeedbackState) {
+        statusItem.button?.toolTip = message
+        airPodsStatusHUD.show(message: message, state: state)
+        rebuildMenu()
     }
 
     func showRemotePanel() {

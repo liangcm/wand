@@ -75,9 +75,9 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Wand needs Bluetooth access to connect to your Siri Remote trackpad.</string>
+	<string>Wand uses Bluetooth to control the Siri Remote and connect your selected AirPods.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Wand needs Bluetooth access to connect to your Siri Remote trackpad.</string>
+	<string>Wand uses Bluetooth to control the Siri Remote and connect your selected AirPods.</string>
 </dict>
 </plist>
 EOF

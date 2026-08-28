@@ -17,6 +17,8 @@ SWIFT_FILES=(
     "RemoteInputHandler.swift"
     "CursorController.swift"
     "MediaKeyInterceptor.swift"
+    "AirPodsController.swift"
+    "AirPodsStatusHUD.swift"
     "TouchHandler.swift"
     "SystemVolume.swift"
 )
@@ -55,6 +57,7 @@ swiftc \
     -framework AudioToolbox \
     -framework Carbon \
     -framework AppKit \
+    -framework IOBluetooth \
     -framework MultitouchSupport
 
 if [ $? -eq 0 ]; then

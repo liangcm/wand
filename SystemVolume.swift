@@ -72,6 +72,149 @@ enum SystemVolume {
         let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &id)
         return (status == noErr && id != 0) ? id : nil
     }
+
+    /// Select an output device whose CoreAudio name matches the connected Bluetooth device.
+    /// AirPods audio endpoints may appear a few seconds after the baseband connection, so the
+    /// caller retries this method until the endpoint is published.
+    static func setDefaultOutputDevice(named bluetoothName: String) -> Bool {
+        guard let deviceID = outputDeviceID(named: bluetoothName) else { return false }
+        return setDefaultOutputDevice(deviceID)
+    }
+
+    /// Route audio back to a real built-in output before disconnecting AirPods. Leaving the
+    /// Bluetooth endpoint selected lets macOS reconnect it as soon as any app plays a sound.
+    static func setDefaultBuiltInOutputDevice() -> Bool {
+        guard let deviceID = allAudioDeviceIDs().first(where: { deviceID in
+            hasOutputStreams(deviceID) && transportType(deviceID) == kAudioDeviceTransportTypeBuiltIn
+        }) else { return false }
+        return setDefaultOutputDevice(deviceID)
+    }
+
+    static func hasBluetoothAirPodsOutput() -> Bool {
+        allAudioDeviceIDs().contains { id in
+            guard hasOutputStreams(id),
+                  transportType(id) == kAudioDeviceTransportTypeBluetooth,
+                  let name = deviceName(id) else { return false }
+            let normalizedName = normalizedDeviceName(name)
+            return normalizedName.contains("airpods") || normalizedName.contains("air pods")
+        }
+    }
+
+    private static func setDefaultOutputDevice(_ deviceID: AudioObjectID) -> Bool {
+        var id = deviceID
+        let size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var outputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let outputStatus = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &outputAddress, 0, nil, size, &id
+        )
+
+        // Keep alert/system sounds on the same AirPods when macOS exposes this writable key.
+        var systemAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        _ = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &systemAddress, 0, nil, size, &id
+        )
+        return outputStatus == noErr
+    }
+
+    private static func outputDeviceID(named targetName: String) -> AudioObjectID? {
+        let devices = allAudioDeviceIDs().filter(hasOutputStreams)
+        let normalizedTarget = normalizedDeviceName(targetName)
+        if let exactMatch = devices.first(where: { id in
+            guard let name = deviceName(id) else { return false }
+            let normalizedName = normalizedDeviceName(name)
+            return normalizedName == normalizedTarget ||
+                normalizedName.contains(normalizedTarget) ||
+                normalizedTarget.contains(normalizedName)
+        }) {
+            return exactMatch
+        }
+
+        // The Bluetooth service and CoreAudio endpoint frequently use different AirPods
+        // names (for example "AirPods 4 (ANC)" versus "Ray‘s AirPods 4"). Only connected
+        // audio endpoints appear in this list, so falling back to a Bluetooth AirPods output
+        // is both more reliable and still avoids selecting unrelated Bluetooth speakers.
+        guard normalizedTarget.contains("airpods") || normalizedTarget.contains("air pods") else {
+            return nil
+        }
+        return devices.first { id in
+            guard transportType(id) == kAudioDeviceTransportTypeBluetooth,
+                  let name = deviceName(id) else { return false }
+            let normalizedName = normalizedDeviceName(name)
+            return normalizedName.contains("airpods") || normalizedName.contains("air pods")
+        }
+    }
+
+    private static func allAudioDeviceIDs() -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize
+        ) == noErr else { return [] }
+
+        let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
+        var devices = Array(repeating: AudioObjectID(0), count: count)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, &devices
+        ) == noErr else { return [] }
+        return devices
+    }
+
+    private static func hasOutputStreams(_ deviceID: AudioObjectID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        return AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size) == noErr &&
+            size >= UInt32(MemoryLayout<AudioStreamID>.size)
+    }
+
+    private static func transportType(_ deviceID: AudioObjectID) -> UInt32? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value) == noErr
+            ? value : nil
+    }
+
+    private static func deviceName(_ deviceID: AudioObjectID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var name: CFString = "" as CFString
+        var size = UInt32(MemoryLayout<CFString>.size)
+        let status = withUnsafeMutablePointer(to: &name) { pointer in
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, pointer)
+        }
+        return status == noErr ? name as String : nil
+    }
+
+    private static func normalizedDeviceName(_ name: String) -> String {
+        name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "‘", with: "'")
+            .replacingOccurrences(of: " ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 /// Reverts AVRCP-origin volume changes caused by the Siri Remote's volume buttons.

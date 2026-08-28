@@ -130,3 +130,18 @@
 "key.rightShift" = "Right Shift";
 "key.leftOption" = "Left Option";
 "key.rightOption" = "Right Option";
+
+/* AirPods quick connection */
+"airpods.choose" = "Choose AirPods";
+"airpods.notFound" = "No paired AirPods found";
+"airpods.connected" = "Connected";
+"airpods.disconnected" = "Disconnected";
+"airpods.busy" = "Connecting AirPods…";
+"airpods.connecting" = "Connecting %@…";
+"airpods.disconnecting" = "Disconnecting %@…";
+"airpods.toggle.named" = "%@ · %@";
+"airpods.didConnect" = "%@ connected and selected for audio";
+"airpods.connectedNoAudio" = "%@ connected, but its audio output is not available yet";
+"airpods.connectFailed" = "Could not connect %@ (%d)";
+"airpods.didDisconnect" = "%@ disconnected";
+"airpods.disconnectFailed" = "Could not disconnect %@ (%d)";

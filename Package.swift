@@ -23,6 +23,8 @@ let package = Package(
                 "RemoteInputHandler.swift",
                 "CursorController.swift",
                 "MediaKeyInterceptor.swift",
+                "AirPodsController.swift",
+                "AirPodsStatusHUD.swift",
                 "TouchHandler.swift",
                 "SystemVolume.swift"
             ],
@@ -31,7 +33,8 @@ let package = Package(
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("AudioToolbox"),
                 .linkedFramework("Carbon"),
-                .linkedFramework("AppKit")
+                .linkedFramework("AppKit"),
+                .linkedFramework("IOBluetooth")
             ]
         )
     ]

@@ -130,3 +130,18 @@
 "key.rightShift" = "右 Shift";
 "key.leftOption" = "左 Option";
 "key.rightOption" = "右 Option";
+
+/* AirPods 快捷连接 */
+"airpods.choose" = "选择 AirPods";
+"airpods.notFound" = "没有找到已配对的 AirPods";
+"airpods.connected" = "已连接";
+"airpods.disconnected" = "未连接";
+"airpods.busy" = "AirPods 正在连接…";
+"airpods.connecting" = "正在连接 %@…";
+"airpods.disconnecting" = "正在断开 %@…";
+"airpods.toggle.named" = "%@ · %@";
+"airpods.didConnect" = "%@ 已连接并切换为音频输出";
+"airpods.connectedNoAudio" = "%@ 已连接，但音频输出尚未出现";
+"airpods.connectFailed" = "%@ 连接失败（%d）";
+"airpods.didDisconnect" = "%@ 已断开";
+"airpods.disconnectFailed" = "%@ 断开失败（%d）";

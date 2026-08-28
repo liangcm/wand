@@ -19,6 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var remoteDetector: RemoteDetector?
     private var remoteInputHandler: RemoteInputHandler?
     private var mediaKeyInterceptor: MediaKeyInterceptor?
+    private var airPodsController: AirPodsController?
     private var touchHandler: TouchHandler?
     private var macTVModeObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
@@ -42,8 +43,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusItem.isVisible = true
         
+        // Initialize AirPods shortcut before building the menu so its current target and
+        // connection state are visible immediately.
+        let airPodsController = AirPodsController()
+        self.airPodsController = airPodsController
+
         // Initialize menu bar manager
-        menuBarManager = MenuBarManager(statusItem: statusItem)
+        menuBarManager = MenuBarManager(statusItem: statusItem, airPodsController: airPodsController)
+        airPodsController.onStateChanged = { [weak self] in
+            self?.menuBarManager?.refreshAirPodsMenu()
+        }
+        airPodsController.onFeedback = { [weak self] message, state in
+            self?.menuBarManager?.showAirPodsFeedback(message, state: state)
+        }
         if CommandLine.arguments.contains("--show-panel") {
             menuBarManager.showRemotePanel()
         }
@@ -146,6 +158,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         mediaKeyInterceptor?.onMediaKey = { [weak self] keyType in
             guard let self = self else { return false }
             return self.handleInterceptedMediaKey(keyType)
+        }
+        mediaKeyInterceptor?.onAirPodsToggle = { [weak self] in
+            self?.airPodsController?.toggle()
         }
         mediaKeyInterceptor?.start()
         remoteInputHandler?.onPowerButtonPressed = { [weak self] in

@@ -8,6 +8,7 @@
 
 import Cocoa
 import CoreGraphics
+import Carbon.HIToolbox
 
 // IOKit/hidsystem/ev_keymap.h exports this as NX_POWER_KEY (6), not NX_KEYTYPE_POWER.
 private let wandNXPowerKey = Int32(6)
@@ -19,6 +20,7 @@ class MediaKeyInterceptor {
     private var wakeObserver: NSObjectProtocol?
     
     var onMediaKey: ((MediaKeyType) -> Bool)?
+    var onAirPodsToggle: (() -> Void)?
     
     enum MediaKeyType {
         case playPause, next, previous, volumeUp, volumeDown, mute, power
@@ -102,6 +104,21 @@ class MediaKeyInterceptor {
            event.getIntegerValueField(.keyboardEventKeycode) == wandVirtualPowerKeyCode {
             rmDebug("🛡 Consumed keyboard power event (type=\(type.rawValue))")
             _ = onMediaKey?(.power)
+            return nil
+        }
+
+        // Global Control+\ shortcut. With a Chinese input method the physical backslash key
+        // is shown as "、", matching the requested Control+、 gesture. Consume both edges so
+        // the frontmost application never sees a stray key-up; ignore auto-repeat.
+        if type == .keyDown || type == .keyUp,
+           event.getIntegerValueField(.keyboardEventKeycode) == Int64(kVK_ANSI_Backslash),
+           event.flags.contains(.maskControl),
+           !event.flags.contains(.maskCommand),
+           !event.flags.contains(.maskAlternate) {
+            if type == .keyDown,
+               event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                DispatchQueue.main.async { [weak self] in self?.onAirPodsToggle?() }
+            }
             return nil
         }
         
