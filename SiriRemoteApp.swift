@@ -105,10 +105,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         touchHandler?.onPointerClick = { [weak self] in
             self?.remoteInputHandler?.missionControlPointerSelectionCompleted()
         }
-        // Button mode blocks all direct trackpad gestures while keeping the device attached
-        // so switching back to trackpad mode is immediate.
+        // Trackpad mode controls the pointer. Mac TV's button mode instead recognizes one
+        // four-way navigation swipe per touch session without leaking cursor movement/clicks.
         touchHandler?.isPointerInputEnabled = { [weak self] in
             self?.remoteInputHandler?.controlMode == .trackpad
+        }
+        touchHandler?.isDirectionalSwipeEnabled = { [weak self] in
+            self?.remoteInputHandler?.controlMode == .buttons
+        }
+        touchHandler?.onDirectionalSwipe = { [weak self] direction in
+            self?.remoteInputHandler?.handleDirectionalSwipe(direction)
         }
         touchHandler?.start()
         remoteInputHandler?.onButtonActivity = { [weak self] in

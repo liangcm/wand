@@ -111,6 +111,20 @@ class RemoteInputHandler {
         applyControlMode(frontmost ? .buttons : .trackpad, reason: "Mac TV frontmost=\(frontmost)")
     }
 
+    /// Touch-surface swipes are fixed navigation inputs in Mac TV. Physical direction clicks
+    /// remain configurable, while a swipe always behaves like its matching keyboard arrow.
+    func handleDirectionalSwipe(_ direction: TouchSwipeDirection) {
+        guard controlMode == .buttons, isMacTVFrontmost else { return }
+        let action: RemoteAction
+        switch direction {
+        case .up:    action = .up
+        case .down:  action = .down
+        case .left:  action = .left
+        case .right: action = .right
+        }
+        menuBarManager?.execute(action, storageKey: "swipe:\(direction.rawValue)")
+    }
+
     /// Mission Control is a Dock-owned system overlay and does not replace Mac TV as the
     /// frontmost application. Explicitly release button mode so the touch surface can move
     /// and click the pointer while the overlay is visible.

@@ -10,6 +10,13 @@ import CoreGraphics
 import AppKit
 import Darwin
 
+enum TouchSwipeDirection: String {
+    case up
+    case down
+    case left
+    case right
+}
+
 private func touchCallback(device: MTDevice?,
                            touches: UnsafeMutablePointer<MTTouch>?,
                            numTouches: Int,
@@ -54,10 +61,13 @@ class TouchHandler {
     private var touchStartTime: UInt64 = 0
     private var touchStartPosition: CGPoint = .zero
     private var suppressButtonModeSelectionTouch = false
+    private var directionalSwipeFired = false
     
     private let cursorScale: CGFloat = 500.0
     private let tapMaxDuration: Double = 0.22
     private let tapMaxDistance: CGFloat = 0.07
+    private let directionalSwipeThreshold: CGFloat = 0.16
+    private let directionalSwipeDominance: CGFloat = 1.25
     private var hadMultipleFingersInSession = false
 
     // Multi-finger pinch-in detection. Scale-free: we track each touch's mean distance to the
@@ -80,6 +90,10 @@ class TouchHandler {
     /// Returns whether direct trackpad input may control the Mac. Button mode keeps the
     /// device attached for fast switching, but must not move, scroll, tap, or pinch.
     var isPointerInputEnabled: (() -> Bool)?
+    /// Button mode uses the touch surface as a four-way swipe pad. Each touch session emits
+    /// at most one direction and never leaks through as cursor movement or a pointer click.
+    var isDirectionalSwipeEnabled: (() -> Bool)?
+    var onDirectionalSwipe: ((TouchSwipeDirection) -> Void)?
     private let reconnectInterval: TimeInterval = 2.0
     private let idleTimeout: TimeInterval = 90.0
     private let touchStarvationThreshold: TimeInterval = 15.0
@@ -264,16 +278,21 @@ class TouchHandler {
             return
         }
 
-        guard isPointerInputEnabled?() ?? true else {
+        let pointerInputEnabled = isPointerInputEnabled?() ?? true
+        let directionalSwipeEnabled = isDirectionalSwipeEnabled?() ?? false
+        guard pointerInputEnabled || directionalSwipeEnabled else {
             cancelPointerGesture()
             return
         }
 
         guard count > 0, let touchPtr = touches else {
             // Touch ended
-            handleTouchEnd()
+            if pointerInputEnabled {
+                handleTouchEnd()
+            }
             lastTouchPosition = nil
             lastTouchCount = 0
+            directionalSwipeFired = false
             return
         }
         
@@ -294,9 +313,12 @@ class TouchHandler {
         }
         
         guard activeTouchCount > 0 else {
-            handleTouchEnd()
+            if pointerInputEnabled {
+                handleTouchEnd()
+            }
             lastTouchPosition = nil
             lastTouchCount = 0
+            directionalSwipeFired = false
             return
         }
         
@@ -314,8 +336,21 @@ class TouchHandler {
             hadMultipleFingersInSession = false
             pinchPeakSpread = 0
             pinchFired = false
+            directionalSwipeFired = false
             touchStartTime = mach_absolute_time()
             touchStartPosition = currentPos
+            lastTouchPosition = currentPos
+            lastTouchCount = activeTouchCount
+            return
+        }
+
+        // In Mac TV button mode the clickpad behaves like an Apple TV navigation surface:
+        // one decisive single-finger swipe produces one arrow key. Recognition uses total
+        // displacement from touch-down, keeping it stable across different callback rates.
+        if directionalSwipeEnabled {
+            if activeTouchCount == 1 && !hadMultipleFingersInSession && !directionalSwipeFired {
+                detectDirectionalSwipe(at: currentPos)
+            }
             lastTouchPosition = currentPos
             lastTouchCount = activeTouchCount
             return
@@ -433,6 +468,31 @@ class TouchHandler {
         hadMultipleFingersInSession = false
         pinchPeakSpread = 0
         pinchFired = false
+        directionalSwipeFired = false
+    }
+
+    private func detectDirectionalSwipe(at currentPosition: CGPoint) {
+        let dx = currentPosition.x - touchStartPosition.x
+        let dy = currentPosition.y - touchStartPosition.y
+        let absX = abs(dx)
+        let absY = abs(dy)
+
+        let direction: TouchSwipeDirection?
+        if absX >= directionalSwipeThreshold && absX >= absY * directionalSwipeDominance {
+            direction = dx > 0 ? .right : .left
+        } else if absY >= directionalSwipeThreshold && absY >= absX * directionalSwipeDominance {
+            // MultitouchSupport's normalized Y axis increases toward the top of the pad.
+            direction = dy > 0 ? .up : .down
+        } else {
+            direction = nil
+        }
+
+        guard let direction else { return }
+        directionalSwipeFired = true
+        rmDebug("👆 Touch swipe \(direction.rawValue) → arrow key")
+        DispatchQueue.main.async { [weak self] in
+            self?.onDirectionalSwipe?(direction)
+        }
     }
 
     private func moveCursor(deltaX: CGFloat, deltaY: CGFloat) -> (clampedX: Bool, clampedY: Bool) {
